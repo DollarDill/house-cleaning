@@ -17,14 +17,14 @@ never auto-deletes. Nothing merges red.
 
 Claude Code (as a plugin):
 
-    /plugin install <this-repo-url>
+    /plugin install https://github.com/DollarDill/house-cleaning
 
 Or copy `skills/house-cleaning/` into your skills directory.
 
 ## Use
 
-    /house-cleaning            # deep-clean the repo
-    /house-cleaning src/       # deep-clean one directory
+    /house-cleaning:house-cleaning            # plugin install
+    /house-cleaning [dir]                     # bare-copy install (skills directory)
 
 The skill is user-invoked only.
 
