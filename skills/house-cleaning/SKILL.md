@@ -49,7 +49,7 @@ Apply `cull.sh untracked <list>` to approved untracked proposals: it tars them t
 
 Read every remaining in-scope file in full. Every token, every word, considered for deletion — no sampling, no shortlist substitute. Linter hints and pattern greps (identity operands, redundant qualifiers) order the work; they never bound it.
 
-- Code tokens: strict deletion only — never renaming. Collect per-file deletions, apply as one batch, `scripts/oracle.sh run`, bisect on red. Oracle-surviving deletions that could hurt a human reader (explicit type annotations, clarifying qualifiers) demote to proposals.
+- Code tokens: strict deletion only — never renaming. Sub-line code deletions are agent-applied: edit, run `scripts/oracle.sh run`, and on red revert with `git checkout -- <file>` yourself — the mechanical auto-revert covers only whole-line-and-above verbs. Oracle-surviving deletions that could hurt a human reader (explicit type annotations, clarifying qualifiers) demote to proposals.
 - Prose (comments, docstrings, docs): apply the deletion test per sentence and per word — if removing it loses no meaning for the reader, remove it (see `references/prose.md`). Prose has no machine oracle: all non-trivial prose deletions are proposals.
 
 *Done when: every in-scope file audited; word-deltas recorded; proposals complete.*
