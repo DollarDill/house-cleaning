@@ -130,7 +130,8 @@ make_fixture
 printf '%s\n' dead-module.sh dead-module2.sh > /tmp/hc-batch-$$.txt
 n_before="$(git rev-list --count HEAD)"
 "$SCRIPTS/cull.sh" batch /tmp/hc-batch-$$.txt HIGH >/dev/null
-[ ! -f dead-module.sh ] && [ ! -f dead-module2.sh ] || fail "batch should delete both dead files"
+[ ! -f dead-module.sh ] || fail "batch should delete dead-module.sh"
+[ ! -f dead-module2.sh ] || fail "batch should delete dead-module2.sh"
 n_after="$(git rev-list --count HEAD)"
 [ "$((n_after - n_before))" -eq 1 ] || fail "green batch must be ONE commit (got $((n_after - n_before)))"
 ok "batch green = one commit"
