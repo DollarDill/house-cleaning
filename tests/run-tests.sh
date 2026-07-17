@@ -41,6 +41,13 @@ rc=0; "$SCRIPTS/oracle.sh" run >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 2 ] || fail "missing oracle file should exit 2 (got $rc)"
 ok "oracle missing file"
 
+make_fixture
+echo "bash -c 'test -f .flaked || { touch .flaked; exit 1; }'" > .house-cleaning/oracle
+rm -f .flaked
+"$SCRIPTS/oracle.sh" run >/dev/null || fail "oracle flake fixture should exit 0 (retry should flip to green)"
+awk -F'\t' 'NF==6 && $2=="flake" && $5=="flake"' .house-cleaning/verdicts.log | grep -q . || fail "flake should be logged with 6 tab-separated fields, kind=flake, verdict=flake"
+ok "oracle flake retry treated green + logged"
+
 cd "$TMP"; rm -rf det; mkdir det; cd det
 printf '{ "scripts": { "test": "echo t", "build": "echo b" } }\n' > package.json
 out="$("$SCRIPTS/oracle.sh" detect)"
