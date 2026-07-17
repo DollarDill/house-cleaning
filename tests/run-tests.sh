@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Self-tests for house-cleaning scripts, run against a planted fixture project.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPTS="$ROOT/skills/house-cleaning/scripts"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+fail() { echo "FAIL: $*" >&2; exit 1; }
+ok() { echo "ok: $*"; }
+
+# Fixture: tiny git project whose oracle is `bash check.sh`.
+# Planted: dead-module.sh (dead file), lib.sh line 2 (dead line), lib.sh line 1 (live line).
+make_fixture() {
+  rm -rf "$TMP/proj"; mkdir -p "$TMP/proj"; cd "$TMP/proj"
+  git init -q -b main
+  git config user.email test@test; git config user.name test
+  printf 'live() { echo 42; }\nDEAD_VAR="unused sediment"\n' > lib.sh
+  cat > check.sh <<'CHK'
+#!/usr/bin/env bash
+out=$(bash -c '. ./lib.sh; live')
+[ "$out" = "42" ]
+CHK
+  printf 'totally_unreferenced() { echo never; }\n' > dead-module.sh
+  printf 'also_unreferenced() { echo never; }\n' > dead-module2.sh
+  git add -A; git commit -qm init
+  git checkout -qb house-cleaning/test
+  mkdir -p .house-cleaning
+  echo "bash check.sh" > .house-cleaning/oracle
+}
+
+# --- oracle.sh tests ---
+make_fixture
+"$SCRIPTS/oracle.sh" run >/dev/null || fail "oracle green fixture should exit 0"
+ok "oracle run green"
+
+echo "false" > .house-cleaning/oracle
+"$SCRIPTS/oracle.sh" run >/dev/null 2>&1 && fail "oracle red fixture should exit 1"
+ok "oracle run red"
+
+rm .house-cleaning/oracle
+rc=0; "$SCRIPTS/oracle.sh" run >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 2 ] || fail "missing oracle file should exit 2 (got $rc)"
+ok "oracle missing file"
+
+cd "$TMP"; rm -rf det; mkdir det; cd det
+printf '{ "scripts": { "test": "echo t", "build": "echo b" } }\n' > package.json
+out="$("$SCRIPTS/oracle.sh" detect)"
+echo "$out" | grep -q "npm run test" || fail "detect should propose npm run test"
+echo "$out" | grep -q "npm run build" || fail "detect should propose npm run build"
+ok "oracle detect package.json"
+
+echo "ALL ORACLE TESTS PASSED"
