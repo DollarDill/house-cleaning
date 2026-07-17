@@ -33,7 +33,7 @@ Build the candidate manifest in `CULLING.md`. Every file in scope ends up in exa
 - **HIGH** — oracle-verified dead + 2 evidence signals + availability checks: (a) the oracle contains a test command, (b) baseline executed ≥1 test, (c) the candidate's neighborhood is demonstrably seen by the oracle (imported/reachable from tests, or covered per coverage data). Auto-applies.
 - **MEDIUM** — oracle-green but judgment-laden (annotations, comments, docs). Proposal.
 - **LOW** — oracle-blind (dynamic access, untested paths). Proposal, with warning.
-- **Security cap:** candidates matching security-sensitive paths/symbols (auth, crypto, sanitize, middleware, permission, rate-limit, session, csrf) cap at proposal tier regardless of evidence — tests rarely assert absence-of-vulnerability.
+- **Security cap:** candidates matching security-sensitive paths/symbols (auth, crypto, sanitize, middleware, permission, rate-limit, session, csrf, secret, credential, token, key/env files) cap at proposal tier regardless of evidence — tests rarely assert absence-of-vulnerability.
 
 *Done when: every in-scope file is a candidate row or an explicit keep.*
 

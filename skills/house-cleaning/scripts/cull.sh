@@ -87,10 +87,19 @@ keep_guard() {
   done < .house-cleaning/keep
 }
 
+# secrets floor — secret-shaped paths refuse mechanically; humans handle them via proposals outside cull.
+secrets_guard() {
+  case "$1" in
+    *.pem|*.key|*.env|.env.*|*secret*|*credential*|*token*|*.p12|*.keystore)
+      echo "cull: refuse — '$1' is secret-shaped; handle via reviewed proposals, never scripted deletion" >&2
+      exit 2 ;;
+  esac
+}
+
 file_cmd() {
   local path="$1" tier="${2:-HIGH}"
   guard
-  path_guard "$path"; keep_guard "$path"; tracked_guard "$path"
+  path_guard "$path"; keep_guard "$path"; secrets_guard "$path"; tracked_guard "$path"
   rm -- "$path"
   if oracle; then
     commit "$path [file] [$tier]" "$path"
@@ -105,7 +114,7 @@ file_cmd() {
 region_cmd() {
   local path="$1" start="$2" end="$3" tier="${4:-HIGH}"
   guard
-  path_guard "$path"; keep_guard "$path"; tracked_guard "$path"
+  path_guard "$path"; keep_guard "$path"; secrets_guard "$path"; tracked_guard "$path"
   del_region "$path" "$start" "$end"
   if oracle; then
     commit "$path:$start-$end [-$((end - start + 1)) lines] [$tier]" "$path"
@@ -121,7 +130,7 @@ region_cmd() {
 bisect_cmd() {
   local path="$1" start="$2" end="$3" tier="${4:-HIGH}"
   guard
-  path_guard "$path"; keep_guard "$path"; tracked_guard "$path"
+  path_guard "$path"; keep_guard "$path"; secrets_guard "$path"; tracked_guard "$path"
   del_region "$path" "$start" "$end"
   if oracle; then
     commit "$path:$start-$end [-$((end - start + 1)) lines] [$tier]" "$path"
@@ -173,7 +182,7 @@ batch_cmd() {
   local p
   while IFS= read -r p; do
     [ -n "$p" ] || continue
-    path_guard "$p"; keep_guard "$p"; tracked_guard "$p"
+    path_guard "$p"; keep_guard "$p"; secrets_guard "$p"; tracked_guard "$p"
     paths+=( "$p" )
   done < "$list"
   [ "${#paths[@]}" -gt 0 ] || { echo "cull: empty batch list" >&2; exit 2; }
@@ -186,7 +195,7 @@ untracked_cmd() {
   local p
   while IFS= read -r p; do
     [ -n "$p" ] || continue
-    path_guard "$p"; keep_guard "$p"
+    path_guard "$p"; keep_guard "$p"; secrets_guard "$p"
     git ls-files --error-unmatch "$p" >/dev/null 2>&1 && { echo "cull: refuse — '$p' is tracked (use file/batch verbs)" >&2; exit 2; }
   done < "$list"
   local arch
