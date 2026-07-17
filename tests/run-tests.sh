@@ -56,3 +56,40 @@ echo "$out" | grep -q "npm run build" || fail "detect should propose npm run bui
 ok "oracle detect package.json"
 
 echo "ALL ORACLE TESTS PASSED"
+
+# --- cull.sh core tests ---
+make_fixture
+"$SCRIPTS/cull.sh" file dead-module.sh HIGH >/dev/null
+[ ! -f dead-module.sh ] || fail "dead file should be deleted"
+git log --oneline -1 | grep -q "house-cleaning: dead-module.sh" || fail "atomic commit missing"
+awk -F'\t' '$2=="file" && $3=="dead-module.sh" && $5=="deleted"' .house-cleaning/verdicts.log | grep -q . || fail "deleted verdict not logged"
+ok "cull file deletes dead file"
+
+"$SCRIPTS/cull.sh" file check.sh HIGH >/dev/null || true
+[ -f check.sh ] || fail "live file should be restored"
+awk -F'\t' '$2=="file" && $3=="check.sh" && $5=="kept-live"' .house-cleaning/verdicts.log | grep -q . || fail "kept-live verdict not logged"
+ok "cull file keeps live file"
+
+make_fixture
+before="$(cat lib.sh)"
+"$SCRIPTS/cull.sh" region lib.sh 2 2 HIGH >/dev/null
+grep -q "DEAD_VAR" lib.sh && fail "dead line should be gone"
+ok "cull region deletes dead line"
+
+make_fixture
+"$SCRIPTS/cull.sh" region lib.sh 1 1 HIGH >/dev/null || true
+[ "$(cat lib.sh)" = "$before" ] || fail "live-line file should be restored byte-identical"
+ok "cull region keeps live line"
+
+make_fixture
+git checkout -q main
+rc=0; "$SCRIPTS/cull.sh" file dead-module.sh >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 2 ] || fail "should refuse on main (got $rc)"
+git checkout -q house-cleaning/test
+echo dirty >> lib.sh
+rc=0; "$SCRIPTS/cull.sh" file dead-module.sh >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 2 ] || fail "should refuse on dirty tree (got $rc)"
+git checkout -q -- lib.sh
+ok "cull guards refuse main/dirty"
+
+echo "ALL CULL CORE TESTS PASSED"
