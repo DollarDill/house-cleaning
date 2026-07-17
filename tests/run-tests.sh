@@ -117,3 +117,49 @@ git show --name-only --format= HEAD | grep -q '\.house-cleaning' && fail ".house
 ok "commit staging is scoped; no untracked sweep"
 
 echo "ALL CULL CORE TESTS PASSED"
+
+# --- bisect / batch / untracked tests ---
+make_fixture
+"$SCRIPTS/cull.sh" bisect lib.sh 1 2 HIGH >/dev/null || true
+grep -q "DEAD_VAR" lib.sh && fail "bisect should delete the dead line"
+grep -q "live()" lib.sh || fail "bisect must keep the live line"
+"$SCRIPTS/oracle.sh" run >/dev/null || fail "post-bisect oracle must be green"
+ok "bisect isolates dead from live"
+
+make_fixture
+printf '%s\n' dead-module.sh dead-module2.sh > /tmp/hc-batch-$$.txt
+n_before="$(git rev-list --count HEAD)"
+"$SCRIPTS/cull.sh" batch /tmp/hc-batch-$$.txt HIGH >/dev/null
+[ ! -f dead-module.sh ] && [ ! -f dead-module2.sh ] || fail "batch should delete both dead files"
+n_after="$(git rev-list --count HEAD)"
+[ "$((n_after - n_before))" -eq 1 ] || fail "green batch must be ONE commit (got $((n_after - n_before)))"
+ok "batch green = one commit"
+
+make_fixture
+printf '%s\n' dead-module.sh check.sh > /tmp/hc-batch-$$.txt
+"$SCRIPTS/cull.sh" batch /tmp/hc-batch-$$.txt HIGH >/dev/null || true
+[ ! -f dead-module.sh ] || fail "ddmin should still delete the dead member"
+[ -f check.sh ] || fail "ddmin must keep the live member"
+ok "batch red = ddmin isolates"
+rm -f /tmp/hc-batch-$$.txt
+
+make_fixture
+echo junk > junk.txt
+printf 'junk.txt\n' > /tmp/hc-untracked-$$.txt
+"$SCRIPTS/cull.sh" untracked /tmp/hc-untracked-$$.txt >/dev/null
+[ ! -f junk.txt ] || fail "untracked junk should be removed"
+arch=""
+for f in .house-cleaning/untracked-*.tar.gz; do arch="$f"; break; done
+[ -n "$arch" ] || fail "archive file missing"
+tar -tzf "$arch" | grep -q junk.txt || fail "archive must contain junk.txt"
+ok "untracked archives before rm"
+rm -f /tmp/hc-untracked-$$.txt
+
+make_fixture
+echo "dead-module.sh" > .house-cleaning/keep
+rc=0; "$SCRIPTS/cull.sh" file dead-module.sh >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 2 ] || fail "keep-list match must refuse (got $rc)"
+[ -f dead-module.sh ] || fail "keep-listed file must be untouched"
+ok "keep-list refuses by construction"
+
+echo "ALL CULL EXTENDED TESTS PASSED"

@@ -113,8 +113,98 @@ region_cmd() {
   fi
 }
 
+bisect_cmd() {
+  local path="$1" start="$2" end="$3" tier="${4:-HIGH}"
+  guard
+  path_guard "$path"; keep_guard "$path"; tracked_guard "$path"
+  del_region "$path" "$start" "$end"
+  if oracle; then
+    commit "$path:$start-$end [-$((end - start + 1)) lines] [$tier]" "$path"
+    log region "$path" "$start-$end" deleted "$(sha)"
+    return 0
+  fi
+  restore "$path"
+  if [ "$start" -ge "$end" ]; then
+    log region "$path" "$start-$end" kept-live -
+    return 1
+  fi
+  local mid=$(( (start + end) / 2 ))
+  # Later half FIRST: committing a later-half deletion never shifts earlier line numbers.
+  bisect_cmd "$path" "$((mid + 1))" "$end" "$tier" || true
+  bisect_cmd "$path" "$start" "$mid" "$tier" || true
+}
+
+try_set() { # tier path...  → delete all; green ⇒ one commit; red ⇒ restore all, return 1
+  local tier="$1"; shift
+  local p
+  for p in "$@"; do rm -- "$p"; done
+  if oracle; then
+    commit "batch ($# files) [$tier]" "$@"
+    for p in "$@"; do log file "$p" - deleted "$(sha)"; done
+    return 0
+  fi
+  for p in "$@"; do restore "$p"; done
+  return 1
+}
+
+ddmin() { # tier path...
+  local tier="$1"; shift
+  [ "$#" -eq 0 ] && return 0
+  if try_set "$tier" "$@"; then return 0; fi
+  if [ "$#" -eq 1 ]; then
+    log file "$1" - kept-live -
+    return 0
+  fi
+  local half=$(( $# / 2 ))
+  local -a first=( "${@:1:half}" ) second=( "${@:half+1}" )
+  ddmin "$tier" "${second[@]}"
+  ddmin "$tier" "${first[@]}"
+}
+
+batch_cmd() {
+  local list="$1" tier="${2:-HIGH}"
+  guard
+  local -a paths=()
+  local p
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    path_guard "$p"; keep_guard "$p"; tracked_guard "$p"
+    paths+=( "$p" )
+  done < "$list"
+  [ "${#paths[@]}" -gt 0 ] || { echo "cull: empty batch list" >&2; exit 2; }
+  ddmin "$tier" "${paths[@]}"
+}
+
+untracked_cmd() {
+  local list="$1"
+  guard
+  local p
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    path_guard "$p"; keep_guard "$p"
+    git ls-files --error-unmatch "$p" >/dev/null 2>&1 && { echo "cull: refuse — '$p' is tracked (use file/batch verbs)" >&2; exit 2; }
+  done < "$list"
+  local arch
+  arch=".house-cleaning/untracked-$(date +%s).tar.gz"
+  tar -czf "$arch" -T "$list"
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    rm -rf -- "$p"
+    log untracked "$p" - deleted-archived -
+  done < "$list"
+  if ! oracle; then
+    tar -xzf "$arch"
+    log untracked "batch" - restored -
+    echo "cull: untracked removal broke the oracle — restored from $arch" >&2
+    return 1
+  fi
+}
+
 case "${1:-}" in
   file) shift; file_cmd "$@" ;;
   region) shift; region_cmd "$@" ;;
+  bisect) shift; bisect_cmd "$@" ;;
+  batch) shift; batch_cmd "$@" ;;
+  untracked) shift; untracked_cmd "$@" ;;
   *) echo "usage: cull.sh file|region|bisect|batch|untracked ..." >&2; exit 2 ;;
 esac
