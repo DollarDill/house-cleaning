@@ -26,7 +26,7 @@ Or copy `skills/house-cleaning/` into your skills directory.
     /house-cleaning            # deep-clean the repo
     /house-cleaning src/       # deep-clean one directory
 
-The skill is user-invoked only — it never fires on its own.
+The skill is user-invoked only.
 
 **Requirements:** bash 4+, GNU coreutils + GNU sed, git. (BSD/macOS userland is not
 supported in v1 — the scripts refuse rather than risk silent misbehavior.)

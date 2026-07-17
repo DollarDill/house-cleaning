@@ -10,7 +10,7 @@ Deep-clean a repository with the **deletion test**: delete a unit — file, regi
 
 **Announce at start:** "Using house-cleaning to deep-clean `<target>`."
 
-Scope: `/house-cleaning [dir]` — default repo root. Scoping slices a deep clean; it never silently skips. A full clean is a long, deliberate operation by design.
+Scope: `/house-cleaning [dir]` — default repo root. Scoping slices a deep clean; it never silently skips. A full clean is a long, deliberate operation.
 
 ## Stage 0 — Contract
 
