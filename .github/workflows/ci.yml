@@ -1,0 +1,19 @@
+# .github/workflows/ci.yml
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck skills/house-cleaning/scripts/*.sh tests/run-tests.sh
+      - name: self-tests
+        run: tests/run-tests.sh
+      - name: rubric mechanical
+        run: |
+          F=skills/house-cleaning/SKILL.md
+          desc=$(sed -n 's/^description:[[:space:]]*//p' "$F" | head -1)
+          echo "$desc" | grep -qiE '\b(I|we|you|your|yours|our|ours|us|my|me)\b' && exit 1
+          [ "$(grep -c '' "$F")" -lt 500 ] || exit 1
+          ! grep -nE 'ADR-[0-9]|\.internal/|decisions/' "$F"
