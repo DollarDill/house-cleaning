@@ -33,7 +33,11 @@ guard() {
   fi
 }
 
-commit() { local msg="$1"; shift; git add -A -- "$@"; git commit -q -m "house-cleaning: $msg"; }
+commit() {
+  local msg="$1"; shift
+  git add -A -- "$@" || { echo "cull: HALT — git add failed" >&2; exit 4; }
+  git commit -q -m "house-cleaning: $msg" || { echo "cull: HALT — git commit failed" >&2; exit 4; }
+}
 
 # restore MUST leave the path byte-identical to HEAD; a failed restore halts everything (exit 3).
 restore() {
@@ -41,7 +45,7 @@ restore() {
   git diff --quiet -- "$1" || { echo "cull: HALT — restore of $1 failed to reproduce HEAD state" >&2; exit 3; }
 }
 
-del_region() { sed -i -- "${2},${3}d" "$1"; }
+del_region() { sed -i -- "${2},${3}d" "$1" || { echo "cull: HALT — sed failed on $1" >&2; exit 4; }; }
 
 # path_guard — every target must be a repo-relative, existing path that resolves INSIDE the
 # repo; closes both the rm -rf escape class and the tracked-symlink-to-outside escape class.
@@ -113,6 +117,7 @@ region_cmd() {
   fi
 }
 
+# Exit code: 0 once recursion begins (per-region outcomes live in verdicts.log); only the no-recursion case returns 1 for kept-live.
 bisect_cmd() {
   local path="$1" start="$2" end="$3" tier="${4:-HIGH}"
   guard
@@ -194,7 +199,10 @@ untracked_cmd() {
   done < "$list"
   if ! oracle; then
     tar -xzf "$arch"
-    log untracked "batch" - restored -
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      log untracked "$p" - restored -
+    done < "$list"
     echo "cull: untracked removal broke the oracle — restored from $arch" >&2
     return 1
   fi

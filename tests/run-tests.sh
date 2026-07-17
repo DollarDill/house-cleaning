@@ -162,4 +162,21 @@ rc=0; "$SCRIPTS/cull.sh" file dead-module.sh >/dev/null 2>&1 || rc=$?
 [ -f dead-module.sh ] || fail "keep-listed file must be untouched"
 ok "keep-list refuses by construction"
 
+make_fixture
+echo 'export NEEDED=1' > config.env
+cat > check.sh <<'CHK'
+#!/usr/bin/env bash
+[ -f config.env ] || exit 1
+out=$(bash -c '. ./lib.sh; live')
+[ "$out" = "42" ]
+CHK
+git add check.sh; git commit -qm "check requires config.env"
+printf 'config.env\n' > /tmp/hc-untracked-red-$$.txt
+rc=0; "$SCRIPTS/cull.sh" untracked /tmp/hc-untracked-red-$$.txt >/dev/null 2>&1 || rc=$?
+[ "$rc" -ne 0 ] || fail "red untracked run must exit non-zero"
+[ -f config.env ] || fail "config.env must be restored from archive"
+awk -F'\t' '$2=="untracked" && $3=="config.env" && $5=="restored"' .house-cleaning/verdicts.log | grep -q . || fail "per-path restored verdict not logged"
+ok "untracked red path restores + logs per-path"
+rm -f /tmp/hc-untracked-red-$$.txt
+
 echo "ALL CULL EXTENDED TESTS PASSED"
