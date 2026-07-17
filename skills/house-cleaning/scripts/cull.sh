@@ -19,6 +19,10 @@ guard() {
   # GNU floor — BSD sed -i without a suffix is silently destructive; fail loud instead.
   sed --version 2>/dev/null | grep -q GNU || { echo "cull: refuse — GNU sed required (see README Requirements)" >&2; exit 2; }
   mkdir -p .house-cleaning
+  # Scratch-dir hygiene: locally exclude .house-cleaning/ so it can never be swept into a
+  # cull commit (worktree-safe — info/exclude lives per-worktree, not in tracked .gitignore).
+  local ex; ex="$(git rev-parse --git-path info/exclude)"
+  grep -qxF '.house-cleaning/' "$ex" 2>/dev/null || echo '.house-cleaning/' >> "$ex"
   local branch; branch="$(git rev-parse --abbrev-ref HEAD)"
   case "$branch" in
     house-cleaning/*) ;;
@@ -29,7 +33,7 @@ guard() {
   fi
 }
 
-commit() { git add -A; git commit -q -m "house-cleaning: $1"; }
+commit() { local msg="$1"; shift; git add -A -- "$@"; git commit -q -m "house-cleaning: $msg"; }
 
 # restore MUST leave the path byte-identical to HEAD; a failed restore halts everything (exit 3).
 restore() {
@@ -37,15 +41,34 @@ restore() {
   git diff --quiet -- "$1" || { echo "cull: HALT — restore of $1 failed to reproduce HEAD state" >&2; exit 3; }
 }
 
-del_region() { sed -i "${2},${3}d" "$1"; }
+del_region() { sed -i -- "${2},${3}d" "$1"; }
 
-# path_guard — every target must be a repo-relative, existing path; closes the rm -rf escape class.
+# path_guard — every target must be a repo-relative, existing path that resolves INSIDE the
+# repo; closes both the rm -rf escape class and the tracked-symlink-to-outside escape class.
 path_guard() {
   case "$1" in
     /*|~*) echo "cull: refuse — absolute path '$1'" >&2; exit 2 ;;
     *..*) echo "cull: refuse — path traversal in '$1'" >&2; exit 2 ;;
   esac
   [ -e "$1" ] || { echo "cull: refuse — '$1' does not exist" >&2; exit 2; }
+  local rp root
+  rp="$(realpath "$1")"
+  root="$(git rev-parse --show-toplevel)"
+  case "$rp" in
+    "$root"/*) ;;
+    *) echo "cull: refuse — '$1' resolves outside the repo ($rp)" >&2; exit 2 ;;
+  esac
+}
+
+# tracked_guard — only tracked paths go through file/region; untracked targets go through
+# the (Task 4) untracked verb instead. Also closes restore()'s untracked-target crash: a
+# `git checkout -- <untracked path>` fails under set -e with no verdict logged and the file
+# permanently gone.
+tracked_guard() {
+  git ls-files --error-unmatch "$1" >/dev/null 2>&1 || {
+    echo "cull: refuse — '$1' is not tracked (untracked files go through the untracked verb)" >&2
+    exit 2
+  }
 }
 
 # keep-list is untouchable BY CONSTRUCTION: any target matching a .house-cleaning/keep glob refuses.
@@ -63,10 +86,10 @@ keep_guard() {
 file_cmd() {
   local path="$1" tier="${2:-HIGH}"
   guard
-  path_guard "$path"; keep_guard "$path"
-  rm "$path"
+  path_guard "$path"; keep_guard "$path"; tracked_guard "$path"
+  rm -- "$path"
   if oracle; then
-    commit "$path [file] [$tier]"
+    commit "$path [file] [$tier]" "$path"
     log file "$path" - deleted "$(sha)"
   else
     restore "$path"
@@ -78,10 +101,10 @@ file_cmd() {
 region_cmd() {
   local path="$1" start="$2" end="$3" tier="${4:-HIGH}"
   guard
-  path_guard "$path"; keep_guard "$path"
+  path_guard "$path"; keep_guard "$path"; tracked_guard "$path"
   del_region "$path" "$start" "$end"
   if oracle; then
-    commit "$path:$start-$end [-$((end - start + 1)) lines] [$tier]"
+    commit "$path:$start-$end [-$((end - start + 1)) lines] [$tier]" "$path"
     log region "$path" "$start-$end" deleted "$(sha)"
   else
     restore "$path"

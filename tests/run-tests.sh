@@ -92,4 +92,28 @@ rc=0; "$SCRIPTS/cull.sh" file dead-module.sh >/dev/null 2>&1 || rc=$?
 git checkout -q -- lib.sh
 ok "cull guards refuse main/dirty"
 
+make_fixture
+mkdir -p "$TMP/outside"; echo secret > "$TMP/outside/secret.txt"
+ln -s ../outside evil-link
+git add evil-link; git commit -qm "add symlink"
+rc=0; "$SCRIPTS/cull.sh" file evil-link/secret.txt >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 2 ] || fail "symlink escape must refuse (got $rc)"
+[ -f "$TMP/outside/secret.txt" ] || fail "outside file must survive"
+ok "path_guard blocks symlink escape"
+
+make_fixture
+echo stray > stray.sh
+rc=0; "$SCRIPTS/cull.sh" file stray.sh >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 2 ] || fail "untracked target must refuse (got $rc)"
+[ -f stray.sh ] || fail "untracked target must be untouched"
+ok "tracked_guard refuses untracked targets"
+
+make_fixture
+echo junk > stray-junk.txt
+"$SCRIPTS/cull.sh" file dead-module.sh HIGH >/dev/null
+git show --name-only --format= HEAD | grep -q stray-junk && fail "untracked file must not be swept into cull commit"
+git ls-files --others --exclude-standard | grep -q stray-junk.txt || fail "stray file should remain untracked"
+git show --name-only --format= HEAD | grep -q '\.house-cleaning' && fail ".house-cleaning must never be committed"
+ok "commit staging is scoped; no untracked sweep"
+
 echo "ALL CULL CORE TESTS PASSED"
