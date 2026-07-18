@@ -18,13 +18,18 @@ init() {
 append() {
   local run_id="$1" type="$2" fields="$3" dir; dir="$(_run_dir "$run_id")"
   [ -d "$dir" ] || { echo "ledger: refuse — run '$run_id' not initialized" >&2; exit 2; }
-  # No-content rule: reject forbidden keys anywhere in the fields object.
-  local k
-  for k in $FORBIDDEN_KEYS; do
-    if echo "$fields" | jq -e --arg k "$k" 'has($k)' >/dev/null 2>&1; then
-      echo "ledger: refuse — record carries forbidden key '$k' (no code/content in committed artifacts)" >&2; exit 2
-    fi
-  done
+  # No-content rule: reject forbidden keys anywhere in the fields object, at ANY depth —
+  # top-level or nested inside any sub-object (e.g. {"evidence":{"content":"..."}}) — so no
+  # secret or file content can enter committed artifacts via a nested field.
+  local forb_json found
+  # shellcheck disable=SC2086  # intentional word-splitting of the space-separated key list
+  forb_json="$(printf '%s\n' $FORBIDDEN_KEYS | jq -R . | jq -sc .)"
+  found="$(echo "$fields" | jq -r --argjson forb "$forb_json" \
+    '[.. | objects | keys[]?] | unique | map(select(IN($forb[]))) | .[]' 2>/dev/null || true)"
+  if [ -n "$found" ]; then
+    echo "ledger: refuse — record carries forbidden key '$(echo "$found" | head -1)' (no code/content in committed artifacts, any depth)" >&2
+    exit 2
+  fi
   # Newline guard + merge type + ts; jq -c guarantees single-line output.
   echo "$fields" | jq -c --arg ty "$type" --arg t "$(date -u +%FT%TZ)" '. + {type:$ty, ts:$t}' \
     >> "$dir/ledger.jsonl"
