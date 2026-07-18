@@ -1,7 +1,7 @@
 {
   "name": "house-cleaning",
-  "version": "0.1.0",
-  "description": "Progressive deletion-test garbage collector for codebases: culls dead files, lines, and words, each deletion verified by the project's own oracle.",
+  "version": "0.2.0",
+  "description": "Propose-only deletion-test auditor for codebases: finds provably-dead files, lines, and words via the project's own oracle, and asks for approval before removing anything.",
   "author": { "name": "Dillon Frawley" },
   "license": "MIT"
 }
