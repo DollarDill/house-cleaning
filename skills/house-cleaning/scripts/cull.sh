@@ -53,12 +53,14 @@ probe_region() {
   if oracle; then restore "$path"; led probe "$(jq -nc --arg u "$path:$start-$end" --arg g "$gs" --arg t "$tier" '{unit:$u,granularity:"region",verdict:"provably-dead",oracle:"green",tier:$t,git_sha:$g}')"
   else restore "$path"; led probe "$(jq -nc --arg u "$path:$start-$end" --arg g "$gs" '{unit:$u,granularity:"region",verdict:"kept-live",oracle:"red",git_sha:$g}')"; return 1; fi
 }
+# Exit code: 0 once recursion begins (per-region outcomes live in the ledger); only the
+# no-recursion case returns 1 for kept-live.
 probe_bisect() {
   local path="$1" start="$2" end="$3" tier="${4:-HIGH}"; guard; all_guards "$path"
   local gs; gs="$(sha)"; del_region "$path" "$start" "$end"
-  if oracle; then restore "$path"; led probe "$(jq -nc --arg u "$path:$start-$end" '{unit:$u,granularity:"region",verdict:"provably-dead",oracle:"green"}')"; return 0; fi
+  if oracle; then restore "$path"; led probe "$(jq -nc --arg u "$path:$start-$end" --arg g "$gs" '{unit:$u,granularity:"region",verdict:"provably-dead",oracle:"green",git_sha:$g}')"; return 0; fi
   restore "$path"
-  if [ "$start" -ge "$end" ]; then led probe "$(jq -nc --arg u "$path:$start-$end" '{unit:$u,granularity:"line",verdict:"kept-live",oracle:"red"}')"; return 1; fi
+  if [ "$start" -ge "$end" ]; then led probe "$(jq -nc --arg u "$path:$start-$end" --arg g "$gs" '{unit:$u,granularity:"line",verdict:"kept-live",oracle:"red",git_sha:$g}')"; return 1; fi
   local mid=$(( (start + end) / 2 ))
   probe_bisect "$path" "$((mid + 1))" "$end" "$tier" || true
   probe_bisect "$path" "$start" "$mid" "$tier" || true
@@ -69,8 +71,9 @@ probe_bisect() {
 # The `oracle || rc=$?` form (rather than a bare `oracle`) keeps this safe under `set -e`.
 _try_set() { local p rc=0; for p in "$@"; do rm -- "$p"; done; oracle || rc=$?; for p in "$@"; do restore "$p"; done; return "$rc"; }
 _ddmin() { [ "$#" -eq 0 ] && return 0
-  if _try_set "$@"; then local p; for p in "$@"; do led probe "$(jq -nc --arg u "$p" '{unit:$u,granularity:"file",verdict:"provably-dead",oracle:"green"}')"; done; return 0; fi
-  if [ "$#" -eq 1 ]; then led probe "$(jq -nc --arg u "$1" '{unit:$u,granularity:"file",verdict:"kept-live",oracle:"red"}')"; return 0; fi
+  local gs; gs="$(sha)"
+  if _try_set "$@"; then local p; for p in "$@"; do led probe "$(jq -nc --arg u "$p" --arg g "$gs" '{unit:$u,granularity:"file",verdict:"provably-dead",oracle:"green",git_sha:$g}')"; done; return 0; fi
+  if [ "$#" -eq 1 ]; then led probe "$(jq -nc --arg u "$1" --arg g "$gs" '{unit:$u,granularity:"file",verdict:"kept-live",oracle:"red",git_sha:$g}')"; return 0; fi
   local half=$(( $# / 2 )); local -a first=( "${@:1:half}" ) second=( "${@:half+1}" )
   _ddmin "${second[@]}"; _ddmin "${first[@]}"; }
 probe_batch() { local list="$1"; guard; local -a paths=(); local p

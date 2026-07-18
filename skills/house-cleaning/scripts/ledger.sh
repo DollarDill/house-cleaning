@@ -44,6 +44,53 @@ coverage_view() {
     | reduce .[] as $r ({}; .[$r.unit // $r.scope] = {granularity:$r.granularity, verdict:$r.verdict, git_sha:$r.git_sha})'
 }
 
+changed_since() {
+  local sha="$1"
+  git diff --name-only "$sha" HEAD
+}
+
+coverage_summary() {
+  local run_id="$1" L; L="$(_run_dir "$run_id")/ledger.jsonl"
+  local swept; swept="$(jq -s '[.[]|select(.type=="probe")]|length' "$L" 2>/dev/null || echo 0)"
+  local candidates; candidates="$(jq -s '[.[]|select(.type=="candidate")]|length' "$L" 2>/dev/null || echo 0)"
+  local uncovered=$(( candidates - swept )); [ "$uncovered" -lt 0 ] && uncovered=0
+  echo "coverage: swept ${swept} of ${candidates} candidates; ${uncovered} uncovered$( [ "$uncovered" -gt 0 ] && echo ' — run again to continue' )"
+}
+
+# coverage-view --since (resumption invalidation): identical to coverage_view, but a unit's
+# coverage is treated as INVALID (omitted) if its underlying file changed since the unit's
+# OWN recorded git_sha — or if the record carries no git_sha at all (can't confirm
+# freshness ⇒ fail closed; never trust stale line numbers, per Global Constraints "scale
+# honesty"). Consumes the git_sha every probe record now carries (file/region/bisect/batch
+# alike). Per-unit (not a single global diff against one caller-supplied sha) because
+# coverage_view aggregates across runs and different units can carry different recorded
+# shas (last-write-wins).
+coverage_view_since() {
+  local cov; cov="$(coverage_view)"
+  [ "$cov" = "{}" ] && { echo "$cov"; return 0; }
+  local result="$cov" u gs file changed
+  while IFS= read -r u; do
+    [ -n "$u" ] || continue
+    gs="$(echo "$cov" | jq -r --arg u "$u" '.[$u].git_sha // ""')"
+    if [ -z "$gs" ]; then
+      result="$(echo "$result" | jq -c --arg u "$u" 'del(.[$u])')"
+      continue
+    fi
+    # unit is either a bare file path (file/batch granularity) or "path:start-end"
+    # (region/line granularity) — strip the trailing range suffix to get the file.
+    file="$(echo "$u" | sed -E 's/:[0-9]+-[0-9]+$//')"
+    if ! changed="$(git diff --name-only "$gs" HEAD -- "$file" 2>/dev/null)"; then
+      # unresolvable/bad recorded sha ⇒ can't confirm freshness ⇒ fail closed too.
+      result="$(echo "$result" | jq -c --arg u "$u" 'del(.[$u])')"
+      continue
+    fi
+    if [ -n "$changed" ]; then
+      result="$(echo "$result" | jq -c --arg u "$u" 'del(.[$u])')"
+    fi
+  done < <(echo "$cov" | jq -r 'keys[]')
+  echo "$result"
+}
+
 regen_audit() {
   local run_id="$1" dir; dir="$(_run_dir "$run_id")"
   local L="$dir/ledger.jsonl" A="$dir/audit.md"
@@ -66,7 +113,13 @@ regen_audit() {
 case "${1:-}" in
   init) shift; init "$@" ;;
   append) shift; append "$@" ;;
-  coverage-view) coverage_view ;;
+  coverage-view) shift; case "${1:-}" in
+      "") coverage_view ;;
+      --since) coverage_view_since ;;
+      *) echo "usage: ledger.sh coverage-view [--since]" >&2; exit 2 ;;
+    esac ;;
   regen-audit) shift; regen_audit "$@" ;;
-  *) echo "usage: ledger.sh init|append|coverage-view|regen-audit ..." >&2; exit 2 ;;
+  changed-since) shift; changed_since "$@" ;;
+  coverage-summary) shift; coverage_summary "$@" ;;
+  *) echo "usage: ledger.sh init|append|coverage-view|regen-audit|changed-since|coverage-summary ..." >&2; exit 2 ;;
 esac
