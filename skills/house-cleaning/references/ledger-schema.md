@@ -45,7 +45,7 @@ before anything is written — there is no code path that writes a partial or fo
 | [`baseline`](#baseline) | agent, via `append` (Stage 0) | no |
 | [`candidate`](#candidate) | agent, via `append` (Stage 1) | no |
 | [`kept`](#kept) | agent, via `append` (Stage 1) | no |
-| [`probe`](#probe) | `cull.sh probe *` (mechanical verdicts) + agent (`oracle-blind`) | **yes, always** |
+| [`probe`](#probe) | `cull.sh probe *` (mechanical verdicts) + agent (`oracle-blind`) | always on script-emitted probes; agent-authored `oracle-blind` may omit it |
 | [`decision`](#decision) | agent, via `append` (Stage 4) | no |
 | [`applied`](#applied) | `cull.sh apply` / `apply-untracked` + agent (region/word, Stage 5) | no (`sha` instead) |
 | [`proposal`](#proposal-not-currently-emitted) | *no current writer* | — |
@@ -106,8 +106,9 @@ candidate/probe membership count:
 {"type":"candidate","unit":"src/legacy/util.ts","granularity":"file","evidence":["knip"],"tier":"HIGH","source":"knip","ts":"2026-07-18T14:01:00Z"}
 ```
 
-Fields: `unit`, `granularity` (`file`|`region`|`line`|`word`), `evidence` (array of detector
-names), `tier`, `source`.
+Fields: `unit`, `granularity` (`file`|`region`|`line` in practice — the spec's enum also lists
+`word`, but nothing emits it; see the `word` note under [`probe`](#probe)), `evidence` (array
+of detector names), `tier`, `source`.
 
 ### `kept`
 
@@ -141,20 +142,31 @@ rather than re-reading `HEAD`, since a probe never commits mid-batch). A third v
 {"type":"probe","unit":"src/plugins/loader.ts","granularity":"file","verdict":"oracle-blind","reason":"loaded via dynamic require, no test path exercises it","ts":"2026-07-18T14:02:30Z"}
 ```
 
-Fields: `unit`, `granularity` (`file`|`region`|`line`|`word`; `word` is agent-authored only —
-no script probes at word granularity), `verdict` (`provably-dead`|`kept-live`|`oracle-blind`),
-`oracle` (`green`|`red`, absent on `oracle-blind` since no oracle ran), `tier` (present on
-`probe file`/`probe region`'s green path only — `probe bisect` and `probe batch` never stamp
-it), `git_sha` (always present on script-emitted probes).
+Fields: `unit`, `granularity` (`file`|`region`|`line` in practice — see the `word` note below),
+`verdict` (`provably-dead`|`kept-live`|`oracle-blind`), `oracle` (`green`|`red`, absent on
+`oracle-blind` since no oracle ran), `tier` (present on `probe file`/`probe region`'s green
+path only — `probe bisect` and `probe batch` never stamp it), `git_sha` (always present on
+script-emitted probes).
 
-Two implementation details worth knowing when reading raw records:
+A few implementation details worth knowing when reading raw records:
 - **`granularity` is not the verb.** `probe bisect`'s recursive descent writes `granularity:
   "region"` on a green (non-recursing) leaf and `"line"` on a red base case
   (`start >= end`) — there is no `"bisect"` granularity value. `probe batch`'s ddmin always
   writes `granularity: "file"` — there is no `"batch"` value either.
-- `unit` for region/bisect probes is `"<path>:<start>-<end>"` (colon-delimited range suffix);
-  `coverage-view`/`coverage-summary` parse that suffix back off with a regex, not a separate
-  field.
+- **`word` is spec-level, not emitted.** The design spec's `granularity` enum also lists
+  `word` (and `candidate`'s enum carries the same value), but no script or SKILL.md
+  instruction ever writes `granularity:"word"` anywhere in the ledger. SKILL.md Stage 3 routes
+  word-level *code-token* deletions through `probe region|bisect` — they land as ordinary
+  `region`/`line` probes, like any other probe. Word-level *prose* deletions skip probing
+  entirely: there's no machine oracle for meaning, so they go straight to a proposal
+  (`references/prose.md`) with no `probe` record at all. Treat `word` as reserved/spec-level —
+  it is not a value a real ledger will ever contain.
+- `unit` for region/bisect probes is `"<path>:<start>-<end>"` (colon-delimited range suffix).
+  `coverage-view --since` and `coverage-summary` both parse that suffix back off (a `sed`
+  strip to recover the file, plus a bash regex to pull `start`/`end` in `coverage-summary`'s
+  case) to reason about the underlying file or range. Plain `coverage-view` (no `--since`)
+  does **not** parse it — it keys its output directly on the literal `.unit`/`.scope` string,
+  range suffix and all.
 
 ### `decision`
 
