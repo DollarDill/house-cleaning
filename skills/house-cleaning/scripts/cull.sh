@@ -77,15 +77,68 @@ probe_batch() { local list="$1"; guard; local -a paths=(); local p
   while IFS= read -r p; do [ -n "$p" ] || continue; all_guards "$p"; paths+=( "$p" ); done < "$list"
   [ "${#paths[@]}" -gt 0 ] || { echo "cull: empty batch list" >&2; exit 2; }; _ddmin "${paths[@]}"; }
 
-# apply_cmd (Task 3): authorized manifest → oracle → atomic commit. Stubbed here so
-# `cull.sh apply` fails cleanly rather than being an unbound function; T3 replaces this body.
-apply_cmd() { echo "cull: apply not yet implemented (Task 3)" >&2; exit 2; }
+# --- APPLY (Task 3): human-authorized manifest → oracle → atomic commit. NEVER deletes a
+# unit without a decision:approved ledger record (the "never auto-delete" boundary) — that
+# check is an accident-guard on top of the forced human-approval turn upstream, not the
+# boundary itself. ---
+_is_approved() { # unit → 0 iff a decision:approved record for this exact unit exists
+  local unit="$1" L="$HC_DIR/runs/${HC_RUN_ID:?}/ledger.jsonl"
+  [ -f "$L" ] && jq -e --arg u "$unit" 'select(.type=="decision" and .unit==$u and .decision=="approved")' "$L" >/dev/null 2>&1
+}
+# $1 = commit message (NOT a pathspec — must be shifted off before `git add`, else it is
+# passed to `git add` as a bogus pathspec and fails; verified empirically during T3).
+_commit() {
+  local msg="$1"; shift
+  git add -A -- "$@" || { echo "cull: HALT — git add failed" >&2; exit 4; }
+  git commit -q -m "house-cleaning: $msg" || { echo "cull: HALT — git commit failed" >&2; exit 4; }
+}
+
+apply_cmd() {
+  local list="$1"; guard
+  [ -f "$list" ] || { echo "cull: refuse — manifest '$list' not found" >&2; exit 2; }
+  local p
+  # First pass: guard + approval-check EVERY unit before touching anything (never-auto-delete
+  # boundary — if any unit in the manifest lacks approval, refuse before deleting anything).
+  while IFS= read -r p; do [ -n "$p" ] || continue
+    all_guards "$p"
+    _is_approved "$p" || { echo "cull: refuse — '$p' has no decision:approved record (never auto-delete)" >&2; exit 2; }
+  done < "$list"
+  # Second pass: delete → oracle → atomic commit (deletion + applied ledger line together);
+  # red ⇒ restore + HALT (never leaves a broken tree committed).
+  while IFS= read -r p; do [ -n "$p" ] || continue
+    rm -- "$p"
+    if oracle; then
+      # sha is PENDING pre-commit (chicken-and-egg: the real sha doesn't exist until after
+      # this commit) — kept minimal per plan note; the true sha is derivable from `git log`.
+      led applied "$(jq -nc --arg u "$p" --arg s "PENDING" '{unit:$u,sha:$s}')"
+      _commit "$p [file]" "$p" "$HC_DIR/runs/${HC_RUN_ID}/ledger.jsonl"
+    else
+      restore "$p"; echo "cull: HALT — applying '$p' broke the oracle (restored)" >&2; exit 3
+    fi
+  done < "$list"
+}
+
+apply_untracked() {
+  local list="$1"; guard
+  [ -f "$list" ] || { echo "cull: refuse — manifest '$list' not found" >&2; exit 2; }
+  local p
+  while IFS= read -r p; do [ -n "$p" ] || continue; path_guard "$p"; keep_guard "$p"; secrets_guard "$p"
+    git ls-files --error-unmatch "$p" >/dev/null 2>&1 && { echo "cull: refuse — '$p' is tracked (use apply)" >&2; exit 2; }
+    _is_approved "$p" || { echo "cull: refuse — '$p' not approved" >&2; exit 2; }
+  done < "$list"
+  # Archive-BEFORE-rm: untracked units have no git history to restore from, so the tarball
+  # is the only restore path on a red oracle.
+  local arch; arch="$HC_DIR/untracked-$(date +%s).tar.gz"; tar -czf "$arch" -T "$list"
+  while IFS= read -r p; do [ -n "$p" ] || continue; rm -rf -- "$p"; led applied "$(jq -nc --arg u "$p" '{unit:$u,sha:"untracked-archived"}')"; done < "$list"
+  oracle || { tar -xzf "$arch"; echo "cull: untracked removal broke oracle — restored from $arch" >&2; exit 3; }
+}
 
 case "${1:-}" in
   probe) shift; case "${1:-}" in
       file) shift; probe_file "$@" ;; region) shift; probe_region "$@" ;;
       bisect) shift; probe_bisect "$@" ;; batch) shift; probe_batch "$@" ;;
       *) echo "usage: cull.sh probe file|region|bisect|batch ..." >&2; exit 2 ;; esac ;;
-  apply) shift; apply_cmd "$@" ;;   # Task 3
-  *) echo "usage: cull.sh probe|apply ..." >&2; exit 2 ;;
+  apply) shift; apply_cmd "$@" ;;
+  apply-untracked) shift; apply_untracked "$@" ;;
+  *) echo "usage: cull.sh probe|apply|apply-untracked ..." >&2; exit 2 ;;
 esac
