@@ -5,8 +5,18 @@ set -euo pipefail
 command -v jq >/dev/null 2>&1 || { echo "ledger: refuse — jq required (see README Requirements)" >&2; exit 2; }
 HC_DIR=".house-cleaning"
 FORBIDDEN_KEYS='content diff code body snippet'
+# Storage two-way-door (plan Global Constraints): `committed` (default) durably commits
+# the ledger — checkpoint on the current branch, persist-base additively onto the base
+# branch. `local` is the escape hatch — no commits anywhere, .house-cleaning/ gitignored
+# per-repo via .git/info/exclude.
+HC_LEDGER_MODE="${HC_LEDGER_MODE:-committed}"
 
 _run_dir() { echo "$HC_DIR/runs/$1"; }
+_local_mode() { [ "$HC_LEDGER_MODE" = "local" ]; }
+_ensure_local_ignore() {
+  local ex; ex="$(git rev-parse --git-path info/exclude)"
+  grep -qxF "$HC_DIR/" "$ex" 2>/dev/null || echo "$HC_DIR/" >> "$ex"
+}
 
 init() {
   local run_id="$1" scope="$2" git_sha="$3" dir; dir="$(_run_dir "$run_id")"
@@ -144,6 +154,84 @@ regen_audit() {
   } > "$A"
 }
 
+# checkpoint <run_id> — commit .house-cleaning/runs/<run_id>/ on the CURRENT (house-
+# cleaning) branch as a dedicated commit. No-op (beyond gitignoring) in local mode.
+# Idempotent: a second call with nothing new staged is a silent no-op, not an error.
+checkpoint() {
+  local run_id="$1"
+  if _local_mode; then _ensure_local_ignore; return 0; fi
+  local run_dir; run_dir="$(_run_dir "$run_id")"
+  [ -d "$run_dir" ] || { echo "ledger: refuse — checkpoint: run '$run_id' not initialized" >&2; exit 2; }
+  git add -- "$run_dir"
+  # Dedicated, additive-only commit: pathspec-restrict `commit` to $run_dir so any
+  # unrelated staged content elsewhere in the tree is never swept into this commit.
+  git diff --cached --quiet -- "$run_dir" && return 0   # nothing new to checkpoint
+  git commit -q -m "house-cleaning: ledger checkpoint ($run_id)" -- "$run_dir"
+}
+
+# Try to return HEAD to $1 (the original branch). On success, return 0 — the caller
+# decides what exit status to report for the operation that preceded the return. On
+# failure, HALT loudly (exit 3) rather than silently leaving the user on $2 — per plan
+# Task 5 robustness requirement, the one failure mode this function must never produce
+# is a swallowed stranding.
+_return_or_halt() {
+  local target="$1" stranded_on="$2" context="$3"
+  git checkout -q "$target" 2>/dev/null && return 0
+  echo "ledger: HALT — persist-base: $context; FAILED to return to '$target' — you are stranded on '$stranded_on'. Run: git checkout $target" >&2
+  exit 3
+}
+
+# persist-base <base_branch> <run_id> — additively persist .house-cleaning/runs/<run_id>/
+# onto <base_branch>, then return to the current (house-cleaning) branch. No-op (beyond
+# gitignoring) in local mode.
+#
+# Critical mechanics (see plan Task 5 + task brief "critical coordination point"): the
+# run's ledger files are tracked and committed on the CURRENT branch only (via
+# checkpoint), never on <base_branch>. Empirically verified two consequences of that:
+#   1. A plain `git checkout <base>` DELETES those files from the working tree, because
+#      they are tracked-only-on-the-source-branch and <base>'s tree lacks the path — a
+#      naive `checkout <base>; add; commit` therefore commits NOTHING.
+#   2. Pulling them back via `git checkout <cur> -- <path>` (a treeish pathspec checkout)
+#      only works if they are already committed on <cur> — it fails outright against an
+#      uncommitted/untracked path. So this function ALWAYS checkpoints <cur> first
+#      (idempotent — a no-op if already checkpointed) to guarantee a commit exists to
+#      pull from, regardless of whether the caller remembered to checkpoint separately.
+persist_base() {
+  local base="$1" run_id="$2"
+  if _local_mode; then _ensure_local_ignore; return 0; fi
+  local run_dir; run_dir="$(_run_dir "$run_id")"
+  [ -d "$run_dir" ] || { echo "ledger: refuse — persist-base: run '$run_id' not initialized" >&2; exit 2; }
+
+  local cur; cur="$(git rev-parse --abbrev-ref HEAD)"
+  [ "$cur" != "HEAD" ] || { echo "ledger: refuse — persist-base: detached HEAD, need a named current branch" >&2; exit 2; }
+  [ "$cur" != "$base" ] || { echo "ledger: refuse — persist-base: current branch is already base '$base'" >&2; exit 2; }
+
+  checkpoint "$run_id"   # guarantee a commit on $cur to pull from (see comment above)
+
+  git checkout -q "$base" || { echo "ledger: refuse — persist-base: could not checkout base '$base' (still on '$cur')" >&2; exit 2; }
+
+  if ! git checkout -q "$cur" -- "$run_dir" 2>/dev/null; then
+    echo "ledger: refuse — persist-base: could not pull '$run_dir' from '$cur' onto '$base'" >&2
+    _return_or_halt "$cur" "$base" "pull of '$run_dir' from '$cur' failed"
+    exit 2
+  fi
+
+  git add -- "$run_dir"
+  if ! git diff --cached --quiet -- "$run_dir"; then
+    # Additive-only, dedicated commit (pathspec-restricted, matches checkpoint's pattern).
+    if ! git commit -q -m "house-cleaning: audit history ($run_id)" -- "$run_dir"; then
+      git reset -q -- "$run_dir" 2>/dev/null || true
+      git checkout -q -- "$run_dir" 2>/dev/null || true
+      git clean -fdq -- "$run_dir" 2>/dev/null || true
+      echo "ledger: refuse — persist-base: commit onto '$base' failed" >&2
+      _return_or_halt "$cur" "$base" "commit onto '$base' failed"
+      exit 2
+    fi
+  fi   # else: already persisted (idempotent no-op) — nothing new to commit
+
+  _return_or_halt "$cur" "$base" "persist-base completed on '$base'"
+}
+
 case "${1:-}" in
   init) shift; init "$@" ;;
   append) shift; append "$@" ;;
@@ -155,5 +243,7 @@ case "${1:-}" in
   regen-audit) shift; regen_audit "$@" ;;
   changed-since) shift; changed_since "$@" ;;
   coverage-summary) shift; coverage_summary "$@" ;;
-  *) echo "usage: ledger.sh init|append|coverage-view|regen-audit|changed-since|coverage-summary ..." >&2; exit 2 ;;
+  checkpoint) shift; checkpoint "$@" ;;
+  persist-base) shift; persist_base "$@" ;;
+  *) echo "usage: ledger.sh init|append|coverage-view|regen-audit|changed-since|coverage-summary|checkpoint|persist-base ..." >&2; exit 2 ;;
 esac
