@@ -68,6 +68,31 @@ test_skill_reference_pointers_are_one_level() {
 
 test_skill_body_within_line_budget() {
   local S n; S="$(_skill_md)"
-  n="$(wc -l < "$S")"
-  [ "$n" -le 500 ] || fail "SKILL.md over 500 lines ($n) — hard budget is 500 (target ~150)"
+  # CI-rubric parity (.github/workflows/ci.yml "rubric mechanical"): strict < 500, counted
+  # the way CI counts (grep -c '', which counts a final unterminated line too). Aligning the
+  # method AND the strict bound closes the test<->CI gap for the line budget.
+  n="$(grep -c '' "$S")"
+  [ "$n" -lt 500 ] || fail "SKILL.md not under 500 lines ($n); CI rubric requires strict < 500 (target ~150)"
+}
+
+# --- CI "rubric mechanical" parity (all three checks replicated so `run-tests.sh` fails
+# locally on anything CI would reject — the gap that let a pronoun'd description ship). ---
+
+test_skill_description_is_third_person() {
+  local S desc; S="$(_skill_md)"
+  # The human-facing description must read third-person / impersonal: NO first- or
+  # second-person pronoun. Regex + extraction are verbatim from the CI rubric step.
+  desc="$(sed -n 's/^description:[[:space:]]*//p' "$S" | head -1)"
+  if echo "$desc" | grep -qiE '\b(I|we|you|your|yours|our|ours|us|my|me)\b'; then
+    fail "description carries a first/second-person pronoun (CI rubric exit 1): $desc"
+  fi
+}
+
+test_skill_no_internal_path_references() {
+  local hits
+  # The distributable skill must not leak internal ADR / decisions / .internal references.
+  # Mirror CI's `grep -rnE ... skills/ README.md`; fail if ANYTHING matches.
+  hits="$(grep -rnE 'ADR-[0-9]|\.internal/|decisions/' "${ROOT:-.}/skills/" "${ROOT:-.}/README.md" || true)"
+  [ -z "$hits" ] || fail "internal ADR/.internal/decisions reference in distributable skill:
+$hits"
 }

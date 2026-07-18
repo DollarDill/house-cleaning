@@ -1,6 +1,6 @@
 ---
 name: house-cleaning
-description: Propose-only cleaner for dead code and cruft — finds provably-dead code with the deletion test and asks for your approval before removing anything.
+description: Propose-only cleaner for dead code and cruft — finds provably-dead code with the deletion test and requires explicit approval before removing anything.
 disable-model-invocation: true
 ---
 
