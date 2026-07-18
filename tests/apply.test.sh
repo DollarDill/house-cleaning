@@ -169,5 +169,117 @@ test_apply_untracked_red_oracle_restores_from_archive() {
   [ "$rc" -eq 3 ] || fail "red-oracle apply-untracked should HALT with exit 3 (got $rc)"
   ( cd "$d" && test -f stray.ts ) || fail "red-oracle apply-untracked must restore from the archive"
   [ "$(cat "$d/stray.ts")" = "stray content" ] || fail "restored stray.ts content mismatch"
+  # Ledger fidelity (review fix): the group oracle check happens ONCE, after all removals but
+  # before any applied record is written; a red group must leave NO applied record for any
+  # unit in it — otherwise the ledger falsely claims a restored unit was applied.
+  ( grep -q '"type":"applied"' "$d/.house-cleaning/runs/r1/ledger.jsonl" 2>/dev/null ) && fail "no applied record should be logged for a red (restored) untracked unit"
   rm -rf "$d" "$list"
+}
+
+# --- boundary hardening: latest decision record wins (an approved-then-declined unit must
+# refuse; a declined-then-approved unit must proceed) ---
+
+test_apply_refuses_when_latest_decision_is_declined() {
+  local d; d="$(_mk_repo_on_branch)"
+  local before; before="$( cd "$d" && git rev-parse HEAD )"
+  local list; list="$(mktemp)"; printf 'dead.ts\n' > "$list"
+  ( cd "$d" && HC_RUN_ID=r1 bash "$LEDGER" init r1 . "$before" >/dev/null
+    HC_RUN_ID=r1 bash "$LEDGER" append r1 decision '{"unit":"dead.ts","decision":"approved","by":"user"}'
+    HC_RUN_ID=r1 bash "$LEDGER" append r1 decision '{"unit":"dead.ts","decision":"declined","by":"user"}' )
+  local rc=0
+  ( cd "$d" && HC_RUN_ID=r1 bash "$CULL" apply "$list" ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 2 ] || fail "apply must refuse when the LATEST decision for a unit is declined (got $rc)"
+  ( cd "$d" && test -f dead.ts ) || fail "unit whose latest decision is declined must be untouched"
+  local after; after="$( cd "$d" && git rev-parse HEAD )"
+  [ "$before" = "$after" ] || fail "refused apply must not commit"
+  rm -rf "$d" "$list"
+}
+
+test_apply_proceeds_when_latest_decision_is_approved_after_earlier_decline() {
+  local d; d="$(_mk_repo_on_branch)"
+  local before; before="$( cd "$d" && git rev-parse HEAD )"
+  local list; list="$(mktemp)"; printf 'dead.ts\n' > "$list"
+  ( cd "$d" && HC_RUN_ID=r1 bash "$LEDGER" init r1 . "$before" >/dev/null
+    HC_RUN_ID=r1 bash "$LEDGER" append r1 decision '{"unit":"dead.ts","decision":"declined","by":"user"}'
+    HC_RUN_ID=r1 bash "$LEDGER" append r1 decision '{"unit":"dead.ts","decision":"approved","by":"user"}'
+    HC_RUN_ID=r1 bash "$CULL" apply "$list" )
+  ( cd "$d" && test -f dead.ts ) && fail "unit whose latest decision is approved (after an earlier decline) should have been deleted"
+  local n; n="$( cd "$d" && git rev-list --count "$before"..HEAD )"
+  [ "$n" = "1" ] || fail "expected exactly 1 atomic commit (got $n)"
+  rm -rf "$d" "$list"
+}
+
+# --- consistency: empty/all-blank manifest refuses cleanly (mirrors probe_batch) ---
+
+test_apply_refuses_empty_manifest() {
+  local d; d="$(_mk_repo_on_branch)"
+  local before; before="$( cd "$d" && git rev-parse HEAD )"
+  local list; list="$(mktemp)"; printf '\n\n' > "$list"
+  ( cd "$d" && HC_RUN_ID=r1 bash "$LEDGER" init r1 . "$before" >/dev/null )
+  local rc=0
+  ( cd "$d" && HC_RUN_ID=r1 bash "$CULL" apply "$list" ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 2 ] || fail "apply with an all-blank manifest should refuse with exit 2 (got $rc)"
+  local after; after="$( cd "$d" && git rev-parse HEAD )"
+  [ "$before" = "$after" ] || fail "empty-manifest apply must not commit"
+  rm -rf "$d" "$list"
+}
+
+test_apply_untracked_refuses_empty_manifest() {
+  local d; d="$(_mk_repo_on_branch)"
+  local list; list="$(mktemp)"; printf '\n\n' > "$list"
+  ( cd "$d" && HC_RUN_ID=r1 bash "$LEDGER" init r1 . "$(git rev-parse HEAD)" >/dev/null )
+  local rc=0
+  ( cd "$d" && HC_RUN_ID=r1 bash "$CULL" apply-untracked "$list" ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 2 ] || fail "apply-untracked with an all-blank manifest should refuse with exit 2 (got $rc)"
+  rm -rf "$d" "$list"
+}
+
+# --- robustness: an unreadable (permission-denied) manifest refuses cleanly, same as missing ---
+
+test_apply_refuses_unreadable_manifest() {
+  local d; d="$(_mk_repo_on_branch)"
+  local before; before="$( cd "$d" && git rev-parse HEAD )"
+  local list; list="$(mktemp)"; printf 'dead.ts\n' > "$list"; chmod 000 "$list"
+  local rc=0
+  ( cd "$d" && HC_RUN_ID=r1 bash "$CULL" apply "$list" ) >/dev/null 2>&1 || rc=$?
+  chmod 600 "$list"
+  [ "$rc" -eq 2 ] || fail "apply with an unreadable manifest should refuse with exit 2 (got $rc)"
+  local after; after="$( cd "$d" && git rev-parse HEAD )"
+  [ "$before" = "$after" ] || fail "unreadable-manifest apply must not commit"
+  rm -rf "$d" "$list"
+}
+
+test_apply_untracked_refuses_unreadable_manifest() {
+  local d; d="$(_mk_repo_on_branch)"
+  local list; list="$(mktemp)"; printf 'a.ts\n' > "$list"; chmod 000 "$list"
+  local rc=0
+  ( cd "$d" && HC_RUN_ID=r1 bash "$CULL" apply-untracked "$list" ) >/dev/null 2>&1 || rc=$?
+  chmod 600 "$list"
+  [ "$rc" -eq 2 ] || fail "apply-untracked with an unreadable manifest should refuse with exit 2 (got $rc)"
+  rm -rf "$d" "$list"
+}
+
+test_apply_untracked_refuses_missing_manifest() {
+  local d; d="$(_mk_repo_on_branch)"
+  local rc=0
+  ( cd "$d" && HC_RUN_ID=r1 bash "$CULL" apply-untracked /no/such/manifest-file.$$ ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 2 ] || fail "apply-untracked with a missing manifest file should refuse with exit 2 (got $rc)"
+  rm -rf "$d"
+}
+
+# --- robustness: two apply-untracked calls must not collide on the archive filename ---
+
+test_apply_untracked_archive_names_are_unique_across_calls() {
+  local d; d="$(_mk_repo_on_branch)"
+  ( cd "$d" && printf 'one\n' > stray1.ts && printf 'two\n' > stray2.ts )
+  local list1; list1="$(mktemp)"; printf 'stray1.ts\n' > "$list1"
+  local list2; list2="$(mktemp)"; printf 'stray2.ts\n' > "$list2"
+  ( cd "$d" && HC_RUN_ID=r1 bash "$LEDGER" init r1 . "$(git rev-parse HEAD)" >/dev/null
+    HC_RUN_ID=r1 bash "$LEDGER" append r1 decision '{"unit":"stray1.ts","decision":"approved","by":"user"}'
+    HC_RUN_ID=r1 bash "$LEDGER" append r1 decision '{"unit":"stray2.ts","decision":"approved","by":"user"}'
+    HC_RUN_ID=r1 bash "$CULL" apply-untracked "$list1"
+    HC_RUN_ID=r1 bash "$CULL" apply-untracked "$list2" )
+  local n; n="$(ls "$d"/.house-cleaning/untracked-*.tar.gz 2>/dev/null | wc -l)"
+  [ "$n" -eq 2 ] || fail "expected 2 distinct untracked archives (one per call), found $n — possible filename collision"
+  rm -rf "$d" "$list1" "$list2"
 }

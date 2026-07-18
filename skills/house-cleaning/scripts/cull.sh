@@ -81,9 +81,12 @@ probe_batch() { local list="$1"; guard; local -a paths=(); local p
 # unit without a decision:approved ledger record (the "never auto-delete" boundary) — that
 # check is an accident-guard on top of the forced human-approval turn upstream, not the
 # boundary itself. ---
-_is_approved() { # unit → 0 iff a decision:approved record for this exact unit exists
+_is_approved() { # unit → 0 iff the unit's LATEST decision record (last one wins) is "approved"
   local unit="$1" L="$HC_DIR/runs/${HC_RUN_ID:?}/ledger.jsonl"
-  [ -f "$L" ] && jq -e --arg u "$unit" 'select(.type=="decision" and .unit==$u and .decision=="approved")' "$L" >/dev/null 2>&1
+  [ -f "$L" ] || return 1
+  jq -e -s --arg u "$unit" \
+    'map(select(.type=="decision" and .unit==$u)) | length > 0 and .[-1].decision == "approved"' \
+    "$L" >/dev/null 2>&1
 }
 # $1 = commit message (NOT a pathspec — must be shifted off before `git add`, else it is
 # passed to `git add` as a bogus pathspec and fails; verified empirically during T3).
@@ -95,14 +98,16 @@ _commit() {
 
 apply_cmd() {
   local list="$1"; guard
-  [ -f "$list" ] || { echo "cull: refuse — manifest '$list' not found" >&2; exit 2; }
-  local p
+  [ -r "$list" ] || { echo "cull: refuse — manifest '$list' not found or unreadable" >&2; exit 2; }
+  local p n=0
   # First pass: guard + approval-check EVERY unit before touching anything (never-auto-delete
   # boundary — if any unit in the manifest lacks approval, refuse before deleting anything).
   while IFS= read -r p; do [ -n "$p" ] || continue
     all_guards "$p"
     _is_approved "$p" || { echo "cull: refuse — '$p' has no decision:approved record (never auto-delete)" >&2; exit 2; }
+    n=$((n + 1))
   done < "$list"
+  [ "$n" -gt 0 ] || { echo "cull: refuse — empty manifest" >&2; exit 2; }
   # Second pass: delete → oracle → atomic commit (deletion + applied ledger line together);
   # red ⇒ restore + HALT (never leaves a broken tree committed).
   while IFS= read -r p; do [ -n "$p" ] || continue
@@ -120,17 +125,28 @@ apply_cmd() {
 
 apply_untracked() {
   local list="$1"; guard
-  [ -f "$list" ] || { echo "cull: refuse — manifest '$list' not found" >&2; exit 2; }
-  local p
+  [ -r "$list" ] || { echo "cull: refuse — manifest '$list' not found or unreadable" >&2; exit 2; }
+  local p n=0
   while IFS= read -r p; do [ -n "$p" ] || continue; path_guard "$p"; keep_guard "$p"; secrets_guard "$p"
     git ls-files --error-unmatch "$p" >/dev/null 2>&1 && { echo "cull: refuse — '$p' is tracked (use apply)" >&2; exit 2; }
     _is_approved "$p" || { echo "cull: refuse — '$p' not approved" >&2; exit 2; }
+    n=$((n + 1))
   done < "$list"
+  [ "$n" -gt 0 ] || { echo "cull: refuse — empty manifest" >&2; exit 2; }
   # Archive-BEFORE-rm: untracked units have no git history to restore from, so the tarball
-  # is the only restore path on a red oracle.
-  local arch; arch="$HC_DIR/untracked-$(date +%s).tar.gz"; tar -czf "$arch" -T "$list"
-  while IFS= read -r p; do [ -n "$p" ] || continue; rm -rf -- "$p"; led applied "$(jq -nc --arg u "$p" '{unit:$u,sha:"untracked-archived"}')"; done < "$list"
-  oracle || { tar -xzf "$arch"; echo "cull: untracked removal broke oracle — restored from $arch" >&2; exit 3; }
+  # is the only restore path on a red oracle. `$$` keeps concurrent/same-second calls from
+  # overwriting each other's restore point (date +%s alone is only second-granular).
+  local arch; arch="$HC_DIR/untracked-$(date +%s)-$$.tar.gz"; tar -czf "$arch" -T "$list"
+  while IFS= read -r p; do [ -n "$p" ] || continue; rm -rf -- "$p"; done < "$list"
+  # Single group oracle check (untracked units have no per-unit git commit boundary — the
+  # whole batch shares one archive). applied ledger records are written ONLY on green, mirroring
+  # apply_cmd — a red group restores the archive and must leave NO applied record behind for
+  # any unit in it (a red-then-restored unit was never actually applied).
+  if oracle; then
+    while IFS= read -r p; do [ -n "$p" ] || continue; led applied "$(jq -nc --arg u "$p" '{unit:$u,sha:"untracked-archived"}')"; done < "$list"
+  else
+    tar -xzf "$arch"; echo "cull: untracked removal broke oracle — restored from $arch" >&2; exit 3
+  fi
 }
 
 case "${1:-}" in
