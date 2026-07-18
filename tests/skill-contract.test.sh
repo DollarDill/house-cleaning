@@ -35,10 +35,19 @@ test_skill_stages_0_to_5_present() {
 }
 
 test_skill_every_stage_has_done_when() {
-  local S c; S="$(_skill_md)"
-  # One checkable completion criterion per stage (Pocock: each step ends on a Done-when).
-  c="$(grep -ci 'done when' "$S")"
-  [ "$c" -ge 6 ] || fail "expected a 'Done when' per stage (>=6); found $c"
+  local S n slice; S="$(_skill_md)"
+  # Per-stage STRUCTURAL check (not a global count): each Stage N's OWN section must close
+  # on a checkable Done-when. Slice from the Stage N heading to the next level-2 heading, so
+  # a Done-when clustered elsewhere can't satisfy a stage vacuously. awk avoids sed \b
+  # portability worries; the "([^0-9]|$)" guard keeps "Stage 1" from matching "Stage 10".
+  for n in 0 1 2 3 4 5; do
+    slice="$(awk -v n="$n" '
+      $0 ~ "^## Stage " n "([^0-9]|$)" { inseg=1; next }
+      inseg && /^## / { exit }
+      inseg { print }
+    ' "$S")"
+    printf '%s\n' "$slice" | grep -qi 'done when' || fail "Stage $n has no 'Done when' in its own section"
+  done
 }
 
 test_skill_leading_words_present() {

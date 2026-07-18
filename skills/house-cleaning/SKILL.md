@@ -52,6 +52,8 @@ Nominate candidates from static detectors (`references/tools.md`); dynamic langu
 
 Run the **deletion test**, **batch-first**: `scripts/cull.sh probe batch <listfile>` deletes the whole batch, runs the oracle once, and reverts. Collective green ⇒ every member is `provably-dead`; red ⇒ the script isolates the live members and the survivors descend **coarse-to-fine** to `scripts/cull.sh probe region|bisect <path> <start> <end>`. Every probe logs a verdict and records coverage; nothing is committed or applied.
 
+`cull.sh probe` only ever writes `provably-dead` (oracle green) or `kept-live` (oracle red). A candidate the deletion test cannot safely evaluate at all — dynamic access, reflection, an untested path with no oracle coverage — you record as `oracle-blind` yourself (`scripts/ledger.sh append "$HC_RUN_ID" probe '{…}'`); an oracle-blind unit always becomes a proposal, never auto-anything.
+
 **Done when:** every candidate carries a probe verdict — `provably-dead`, `oracle-blind`, or `kept-live` — in the ledger.
 
 ## Stage 3 — Word level (exhaustive-per-unit, coverage-incremental)
@@ -76,7 +78,10 @@ Request approval through the harness's structured question tool where available,
 
 ## Stage 5 — Apply approved
 
-Apply **only** the approved manifest: `scripts/cull.sh apply <manifest>` (tracked — each deletion → oracle → atomic commit) and `scripts/cull.sh apply-untracked <listfile>` (archive-first). Line numbers drift, so re-probe surviving regions at their current positions before applying them — never replay stale line numbers.
+Apply **only** the approved manifest. Two paths, by granularity:
+
+- **Whole-file / whole-unit** — `scripts/cull.sh apply <manifest>` (tracked — each deletion → oracle → atomic commit) and `scripts/cull.sh apply-untracked <listfile>` (untracked — archive-first). Both do a whole-path removal only; a region/word unit like `foo.ts:2-2` is not theirs to handle.
+- **Region and word/token level** (judgment-laden) — apply these yourself; the mechanical auto-revert covers only the whole-file/whole-unit `cull.sh` verbs. Re-probe at current positions first (never replay stale line numbers), edit out the approved region/tokens, run `scripts/oracle.sh run`; on green commit atomically (append an `applied` record — `scripts/ledger.sh append "$HC_RUN_ID" applied '{…}'` — then `git commit`), on red `git checkout -- <file>` to restore and mark it `kept-live`.
 
 **Final gate:** full `scripts/oracle.sh run`. Red ⇒ `git bisect` across the branch's atomic commits, revert the culprit, re-run to green — **never merge red**. Then regenerate the audit and persist the additive audit/ledger to the base branch: `scripts/ledger.sh persist-base <base_branch> "$HC_RUN_ID"` (additive-only — adds `.house-cleaning/` files, touches no code) so history and resumption survive even if the deletions are abandoned. Deletions stay on the `house-cleaning/<date>` branch; the merge or PR is the user's call.
 
