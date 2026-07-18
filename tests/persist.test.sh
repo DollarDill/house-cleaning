@@ -99,3 +99,37 @@ test_local_mode_checkpoint_and_persist_are_noop_and_gitignored() {
     || fail "local mode must gitignore .house-cleaning/ via .git/info/exclude"
   rm -rf "$d"
 }
+
+# Refuse-path coverage (review fix, cc-eval-vmk3): lock in the branch-state guards so a
+# future change can't silently regress them into a stranding or a silent success.
+
+test_persist_base_refuses_when_current_branch_is_base() {
+  local d; d="$(_mk_repo_on_branch)"
+  ( cd "$d" && HC_LEDGER_MODE=committed bash "$LEDGER" init r1 . x >/dev/null
+    HC_LEDGER_MODE=committed bash "$LEDGER" append r1 probe '{"unit":"a.ts","verdict":"provably-dead"}'
+    git checkout -q main )
+  local out
+  if out="$( cd "$d" && HC_LEDGER_MODE=committed bash "$LEDGER" persist-base main r1 2>&1 )"; then
+    fail "persist-base must refuse (nonzero) when the current branch already equals base (got: $out)"
+  fi
+  echo "$out" | grep -qi "already base" || fail "refuse message missing 'already base' context (got: $out)"
+  local cur; cur="$( cd "$d" && git rev-parse --abbrev-ref HEAD )"
+  [ "$cur" = "main" ] || fail "refuse path must not move HEAD (now on '$cur')"
+  rm -rf "$d"
+}
+
+test_persist_base_refuses_on_detached_head() {
+  local d; d="$(_mk_repo_on_branch)"
+  ( cd "$d" && HC_LEDGER_MODE=committed bash "$LEDGER" init r1 . x >/dev/null
+    HC_LEDGER_MODE=committed bash "$LEDGER" append r1 probe '{"unit":"a.ts","verdict":"provably-dead"}' )
+  local sha; sha="$( cd "$d" && git rev-parse HEAD )"
+  ( cd "$d" && git checkout -q "$sha" )
+  local out
+  if out="$( cd "$d" && HC_LEDGER_MODE=committed bash "$LEDGER" persist-base main r1 2>&1 )"; then
+    fail "persist-base must refuse (nonzero) on a detached HEAD (got: $out)"
+  fi
+  echo "$out" | grep -qi "detached" || fail "refuse message missing 'detached' context (got: $out)"
+  local head_after; head_after="$( cd "$d" && git rev-parse HEAD )"
+  [ "$head_after" = "$sha" ] || fail "refuse path must not move HEAD off the detached commit (now '$head_after')"
+  rm -rf "$d"
+}

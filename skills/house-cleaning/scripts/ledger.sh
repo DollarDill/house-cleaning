@@ -162,11 +162,12 @@ checkpoint() {
   if _local_mode; then _ensure_local_ignore; return 0; fi
   local run_dir; run_dir="$(_run_dir "$run_id")"
   [ -d "$run_dir" ] || { echo "ledger: refuse — checkpoint: run '$run_id' not initialized" >&2; exit 2; }
-  git add -- "$run_dir"
+  git add -- "$run_dir" || { echo "ledger: refuse — checkpoint: could not stage '$run_dir'" >&2; exit 2; }
   # Dedicated, additive-only commit: pathspec-restrict `commit` to $run_dir so any
   # unrelated staged content elsewhere in the tree is never swept into this commit.
   git diff --cached --quiet -- "$run_dir" && return 0   # nothing new to checkpoint
-  git commit -q -m "house-cleaning: ledger checkpoint ($run_id)" -- "$run_dir"
+  git commit -q -m "house-cleaning: ledger checkpoint ($run_id)" -- "$run_dir" \
+    || { echo "ledger: refuse — checkpoint: commit failed for run '$run_id'" >&2; exit 2; }
 }
 
 # Try to return HEAD to $1 (the original branch). On success, return 0 — the caller
@@ -216,7 +217,11 @@ persist_base() {
     exit 2
   fi
 
-  git add -- "$run_dir"
+  if ! git add -- "$run_dir"; then
+    echo "ledger: refuse — persist-base: could not stage '$run_dir' on '$base'" >&2
+    _return_or_halt "$cur" "$base" "staging '$run_dir' on '$base' failed"
+    exit 2
+  fi
   if ! git diff --cached --quiet -- "$run_dir"; then
     # Additive-only, dedicated commit (pathspec-restricted, matches checkpoint's pattern).
     if ! git commit -q -m "house-cleaning: audit history ($run_id)" -- "$run_dir"; then
