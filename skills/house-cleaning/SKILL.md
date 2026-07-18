@@ -1,71 +1,93 @@
 ---
 name: house-cleaning
-description: Progressive deletion-test garbage collector for a codebase. Culls dead files, then dead lines, then dead words — every deletion verified by the project's own oracle (build, typecheck, tests) and logged. Invoked deliberately by the user; never fires on its own.
+description: Propose-only cleaner for dead code and cruft — finds provably-dead code with the deletion test and asks for your approval before removing anything.
 disable-model-invocation: true
 ---
 
 # House-Cleaning
 
-Deep-clean a repository with the **deletion test**: delete a unit — file, region, line, word — and let the **oracle** rule. If nothing observable changes, it was dead weight; the deletion stays. If the oracle objects, the script restores it mechanically. Every verdict is logged; everything is reversible.
+Deep-clean a repository with the **deletion test**: delete a unit — a whole dead
+directory, a file, a region, a line, a word — and let the project's own **oracle**
+(build, typecheck, tests) rule. Nothing observable changed? The unit is
+**provably-dead**. The oracle objects, or can't see the unit at all
+(**oracle-blind**)? It stays live. Here every deletion is a **probe** —
+delete → oracle → **always revert** — that gathers evidence and commits nothing.
+You probe, you **propose**, the human approves; only then do approved removals
+apply. The append-only **coverage ledger** records every verdict so a massive
+repo is cleaned incrementally across runs.
 
-**Announce at start:** "Using house-cleaning to deep-clean `<target>`."
+**Announce at start:** "Using house-cleaning to audit `<target>` (propose-only)."
 
-Scope: `/house-cleaning [dir]` — default repo root. Scoping slices a deep clean; it never silently skips. A full clean is a long, deliberate operation.
+**Scope:** `/house-cleaning [dir]` — default repo root. Scoping slices the audit; it never silently skips.
+
+**When NOT to use:** a dirty working tree, an untrusted repo (the oracle runs its code), or when you want deletions applied without review — this tool asks first, every time.
+
+## The boundary (bright lines)
+
+- **Never auto-delete.** No removal applies without a **forced human** approval turn (Stage 4). `cull.sh apply` runs only the human-authorized manifest.
+- Probes **always revert**: after any probe the tree is byte-identical to HEAD, and nothing is committed.
+- Approved deletions land as atomic, oracle-verified commits on a `house-cleaning/<date>` branch; **never merge red**.
+- The committed ledger and audit hold identifiers + evidence-type + verdict only — never file contents, diffs, or code.
+- Carried floors (the scripts enforce these — don't restate them): clean tree (modulo `.house-cleaning/`) · `house-cleaning/*` branch only · keep-list untouchable · secret-shaped paths refuse · untracked archived before removal.
+
+Set a run id once — `export HC_RUN_ID=<yyyy-mm-dd-hhmm>` — and every script call in this run carries it. Storage is committed by default (`HC_LEDGER_MODE=committed`); flip to `local` for a no-commit, gitignored ledger. In committed mode, flush the ledger/audit at stage boundaries with `scripts/ledger.sh checkpoint "$HC_RUN_ID"`.
 
 ## Stage 0 — Contract
 
-1. Refuse on a dirty tree. Refuse outside a git repo.
-2. Branch: `git checkout -b house-cleaning/<yyyy-mm-dd>` — never work on main.
-3. Oracle: run `scripts/oracle.sh detect`, show the proposed commands, and get the user's confirmation before writing them to `.house-cleaning/oracle`. **Trust boundary: the oracle executes this repo's code — the user confirms they trust the repo.** No confirmed oracle ⇒ proposals-only mode (nothing auto-applies).
-4. Baseline: `scripts/oracle.sh run` twice. Red ⇒ stop and report. Any flake logged ⇒ **unstable oracle: all-proposals mode**.
-5. Keep-list: read `.house-cleaning/keep` (globs) if present; offer to seed it (entry points, migrations, licenses).
+1. Refuse a dirty tree (outside `.house-cleaning/`) or a non-git repo. Branch: `git checkout -b house-cleaning/<yyyy-mm-dd>` — never main.
+2. Oracle: `scripts/oracle.sh detect` prints proposed commands; **show them and get the user's confirmation** before writing `.house-cleaning/oracle`. Trust boundary — the oracle executes this repo's code.
+3. Baseline: `scripts/oracle.sh run` twice. Red ⇒ stop and report. A flake ⇒ record it and demote confidence.
+4. Keep-list: read `.house-cleaning/keep`; offer to seed it (entry points, migrations, licenses).
+5. `scripts/ledger.sh init "$HC_RUN_ID" <scope> "$(git rev-parse HEAD)"`, then append the `oracle` and `baseline` records.
 
-*Done when: `CULLING.md` exists at the target root recording oracle commands, double-green baseline, keep-list, and scope.*
+**Done when:** the ledger holds `run` + `oracle` + `baseline` records, the keep-list is read, and the `house-cleaning/<date>` branch exists.
 
-## Stage 1 — Culling plan (files)
+## Stage 1 — Nominate (coarse-first)
 
-Build the candidate manifest in `CULLING.md`. Every file in scope ends up in exactly one bucket: **candidate** (with evidence + tier) or **kept** (with reason).
+Nominate candidates from static detectors (`references/tools.md`); dynamic languages need **two independent signals**. Nominate the **coarsest** unit the evidence supports — a whole dead directory or module is one candidate, not a hundred. Enumerate untracked files (`git ls-files --others --exclude-standard`) and classify them; untracked removals are **always proposals** (git can't undo them). Record each in-scope unit as a `candidate` (evidence + tier + granularity) or a `kept` record via `scripts/ledger.sh append "$HC_RUN_ID" candidate '{…}'`.
 
-- Tracked files: run the language's dead-code detector (see `references/tools.md`) + corroborating signals (no inbound imports, build-artifact patterns, git recency). Dynamic languages require **two independent evidence signals** per candidate.
-- Untracked files: enumerate (`git ls-files --others --exclude-standard`), classify (artifact / result / stale working doc / unknown), and propose. Untracked deletions are **always proposals** — git cannot undo them.
+**Done when:** every in-scope unit is a `candidate` or `kept` ledger record, and `scripts/ledger.sh regen-audit "$HC_RUN_ID"` is refreshed.
 
-**Tiers** (auto-apply eligibility):
-- **HIGH** — oracle-verified dead + 2 evidence signals + availability checks: (a) the oracle contains a test command, (b) baseline executed ≥1 test, (c) the candidate's neighborhood is demonstrably seen by the oracle (imported/reachable from tests, or covered per coverage data). Auto-applies.
-- **MEDIUM** — oracle-green but judgment-laden (annotations, comments, docs). Proposal.
-- **LOW** — oracle-blind (dynamic access, untested paths). Proposal, with warning.
-- **Security cap:** candidates matching security-sensitive paths/symbols (auth, crypto, sanitize, middleware, permission, rate-limit, session, csrf, secret, credential, token, key/env files) cap at proposal tier regardless of evidence — tests rarely assert absence-of-vulnerability.
+## Stage 2 — Probe (coarse-to-fine — never applies)
 
-*Done when: every in-scope file is a candidate row or an explicit keep.*
+Run the **deletion test**, **batch-first**: `scripts/cull.sh probe batch <listfile>` deletes the whole batch, runs the oracle once, and reverts. Collective green ⇒ every member is `provably-dead`; red ⇒ the script isolates the live members and the survivors descend **coarse-to-fine** to `scripts/cull.sh probe region|bisect <path> <start> <end>`. Every probe logs a verdict and records coverage; nothing is committed or applied.
 
-## Stage 2 — Deletion test (batch → files → regions → lines)
+**Done when:** every candidate carries a probe verdict — `provably-dead`, `oracle-blind`, or `kept-live` — in the ledger.
 
-Batch-first: write HIGH-tier candidate paths to a list file, then `scripts/cull.sh batch <list> HIGH` — one oracle run for the whole batch; on red the script ddmin-bisects to isolate the live members. Then per surviving file: suspect regions via `scripts/cull.sh region|bisect`. The script commits every kept deletion atomically and restores every rejected one — restoration is never your judgment call.
+## Stage 3 — Word level (exhaustive-per-unit, coverage-incremental)
 
-Apply `cull.sh untracked <list>` to approved untracked proposals: it tars them to `.house-cleaning/untracked-*.tar.gz` **before** removal — the undo of last resort.
+On the survivors only, go to word granularity. Code tokens: oracle-gated `probe region|bisect`, deletion only (never renaming); an oracle-surviving deletion that hurts a human reader demotes to a proposal. Prose (comments, docstrings, docs): meaning-based per `references/prose.md` — **always proposals**, no machine oracle. This is **budget-bounded**: exhaustive per unit examined, but coverage is incremental — on hitting the per-run budget, checkpoint and report the remainder, never truncate silently. End every run with the mandatory, forced-visible coverage summary — `scripts/ledger.sh coverage-summary "$HC_RUN_ID"` prints a `coverage:` line ("swept X of Y candidates; N uncovered"). Never claim "done" while coverage is partial.
 
-*Done when: every candidate row carries a verdict — `deleted@sha` / `kept-live` / `proposed` — regenerated into `CULLING.md` from `.house-cleaning/verdicts.log` (every log line accounted for).*
+**Done when:** in-scope survivors are audited to word level or a partial checkpoint is recorded, and the `coverage:` summary is shown.
 
-## Stage 3 — Word level (exhaustive audit)
+## Stage 4 — Propose & approve (forced-visible-output; the security boundary)
 
-Read every remaining in-scope file in full. Every token, every word, considered for deletion — no sampling, no shortlist substitute. Linter hints and pattern greps (identity operands, redundant qualifiers) order the work; they never bound it.
+Regenerate the audit — `scripts/ledger.sh regen-audit "$HC_RUN_ID"` — and present it as forced-visible-output, **grouped by confidence, evidence-forward**:
 
-- Code tokens: strict deletion only — never renaming. Sub-line code deletions are agent-applied: edit, run `scripts/oracle.sh run`, and on red revert with `git checkout -- <file>` yourself — the mechanical auto-revert covers only whole-line-and-above verbs. Oracle-surviving deletions that could hurt a human reader (explicit type annotations, clarifying qualifiers) demote to proposals.
-- Prose (comments, docstrings, docs): apply the deletion test per sentence and per word — if removing it loses no meaning for the reader, remove it (see `references/prose.md`). Prose has no machine oracle: all non-trivial prose deletions are proposals.
+- **provably-dead** (oracle-green) — eligible for informed bulk approval ("N units, all oracle-verified dead, evidence attached").
+- **oracle-blind / judgment-laden / prose** — per-item or small-group review.
+- **security- or secret-shaped** — always individual; **never bulk-approvable**.
 
-*Done when: every in-scope file audited; word-deltas recorded; proposals complete.*
+Request approval through the harness's structured question tool where available, else a **numbered plain-text list, then stop for the reply**. The human's selection **is** the apply manifest. Record each choice as a `decision` (approved/declined) ledger record — that record is audit trail, not the enforcement.
 
-## Final gate
+**MUST NEVER** write a `decision:approved` record or call `cull.sh apply` without a human authorization in the same turn — approval is a **forced human** turn, not an agent-authored record.
 
-1. `scripts/oracle.sh run` — full re-run. **Red ⇒ `git bisect` across the branch's atomic commits** (each is one deletion group): find the culprit, revert it, re-run; repeat to green. Never merge red.
-2. Present all proposals for review; apply approved ones through the same cull commands.
-3. Regenerate `CULLING.md` from the verdict log; copy the log to `CULLING.log`; remove `.house-cleaning/` (the untracked archive is offered to the user first).
-4. Merge/PR is the user's decision.
+**Done when:** every proposed unit has a `decision` record and the approved units form the apply manifest.
 
-If the project runs an agent-aware tracker, mirror candidate rows as issues; `CULLING.md` remains the source of truth.
+## Stage 5 — Apply approved
 
-## Bright lines
+Apply **only** the approved manifest: `scripts/cull.sh apply <manifest>` (tracked — each deletion → oracle → atomic commit) and `scripts/cull.sh apply-untracked <listfile>` (archive-first). Line numbers drift, so re-probe surviving regions at their current positions before applying them — never replay stale line numbers.
 
-- Preconditions or refuse: clean tree · double-green baseline · `house-cleaning/*` branch.
-- One deletion = one atomic commit. Red oracle ⇒ the script restores — never discretion.
-- Never: force-push, history rewrite, deleting VCS metadata, secrets/env files, or keep-list matches.
-- Verification is never self-judgment: machine oracle for auto-apply; logged human approval for everything else.
+**Final gate:** full `scripts/oracle.sh run`. Red ⇒ `git bisect` across the branch's atomic commits, revert the culprit, re-run to green — **never merge red**. Then regenerate the audit and persist the additive audit/ledger to the base branch: `scripts/ledger.sh persist-base <base_branch> "$HC_RUN_ID"` (additive-only — adds `.house-cleaning/` files, touches no code) so history and resumption survive even if the deletions are abandoned. Deletions stay on the `house-cleaning/<date>` branch; the merge or PR is the user's call.
+
+**Done when:** approved deletions are atomic oracle-green commits, the final oracle is green, and the audit/ledger is persisted to the base branch.
+
+## Resumption
+
+On every invocation, read the ledger to see what scope has been swept and resume the uncovered remainder: `scripts/ledger.sh coverage-view --since` invalidates coverage for files changed since their recorded sha, so changed units are re-nominated and re-probed. "Know what scope you're looking at" is just the coverage summary — this is how the tool cleans a massive repo across many runs.
+
+## Reference (branch-only)
+
+- `references/tools.md` — dead-code detectors by ecosystem (Stage 1 signals).
+- `references/prose.md` — word-level deletion rules for prose (Stage 3).
+- `references/ledger-schema.md` — ledger record types and the audit projection.
