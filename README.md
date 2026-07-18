@@ -56,7 +56,10 @@ misbehavior.)
   persisted onto the base branch, so the audit trail is team-visible,
   versioned, and survives even an abandoned cleanup. Records hold unit
   identifiers, evidence type, and verdicts only — never file contents, diffs,
-  or code (enforced mechanically, not by convention).
+  or code (enforced mechanically, not by convention). Committed mode
+  force-adds its own `.house-cleaning/` ledger, so upgrading from v1 (or
+  having run `local` mode once) — either of which can leave `.house-cleaning/`
+  git-ignored in this repo — doesn't silently disable it.
 - Untracked deletions are tar-archived before removal — git can't undo them,
   the archive can; the keep-list and secrets floor are honored throughout.
 

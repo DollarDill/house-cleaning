@@ -90,9 +90,10 @@ test_skill_description_is_third_person() {
 
 test_skill_no_internal_path_references() {
   local hits
-  # The distributable skill must not leak internal ADR / decisions / .internal references.
+  # The distributable skill must not leak internal ADR / decisions / .internal references,
+  # or internal tracker/bead IDs (e.g. cc-eval-vmk3) left behind in review-fix comments.
   # Mirror CI's `grep -rnE ... skills/ README.md`; fail if ANYTHING matches.
-  hits="$(grep -rnE 'ADR-[0-9]|\.internal/|decisions/' "${ROOT:-.}/skills/" "${ROOT:-.}/README.md" || true)"
-  [ -z "$hits" ] || fail "internal ADR/.internal/decisions reference in distributable skill:
+  hits="$(grep -rnE 'ADR-[0-9]|\.internal/|decisions/|cc-eval-' "${ROOT:-.}/skills/" "${ROOT:-.}/README.md" || true)"
+  [ -z "$hits" ] || fail "internal ADR/.internal/decisions/tracker-ID reference in distributable skill:
 $hits"
 }

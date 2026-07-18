@@ -60,7 +60,7 @@ changed_since() {
 }
 
 # Does any recorded probe pertain to candidate unit $1 (bash 4+ regex — see plan Global
-# Constraints)? Review fix (cc-eval-vmk3): coverage MUST be counted by candidate-unit
+# Constraints)? Review fix: coverage MUST be counted by candidate-unit
 # MEMBERSHIP, not scalar record-count subtraction — probe_bisect/_ddmin (batch) split ONE
 # candidate into MULTIPLE leaf probe records, so "count of probe records" is not "count of
 # swept candidates" and a naive subtraction under-reports uncovered work (can print "0
@@ -162,7 +162,13 @@ checkpoint() {
   if _local_mode; then _ensure_local_ignore; return 0; fi
   local run_dir; run_dir="$(_run_dir "$run_id")"
   [ -d "$run_dir" ] || { echo "ledger: refuse — checkpoint: run '$run_id' not initialized" >&2; exit 2; }
-  git add -- "$run_dir" || { echo "ledger: refuse — checkpoint: could not stage '$run_dir'" >&2; exit 2; }
+  # -f: this add is pathspec-scoped to the tool's own additive $run_dir, so force-adding is
+  # safe — it never touches user code — and necessary: committed mode (the default) must
+  # still work when .house-cleaning/ is git-ignored (a v1-upgrader's cull.sh left it in
+  # .git/info/exclude in every repo it cleaned; this file's own local mode does the same via
+  # _ensure_local_ignore). A plain `git add` on an explicitly-ignored path errors out rather
+  # than silently skipping it, which would otherwise break the committed-mode default.
+  git add -f -- "$run_dir" || { echo "ledger: refuse — checkpoint: could not stage '$run_dir'" >&2; exit 2; }
   # Dedicated, additive-only commit: pathspec-restrict `commit` to $run_dir so any
   # unrelated staged content elsewhere in the tree is never swept into this commit.
   git diff --cached --quiet -- "$run_dir" && return 0   # nothing new to checkpoint
@@ -217,7 +223,9 @@ persist_base() {
     exit 2
   fi
 
-  if ! git add -- "$run_dir"; then
+  # -f: see checkpoint's comment above — same tool-owned-pathspec-only rationale, and the
+  # same committed-mode-must-survive-a-gitignored-.house-cleaning/ requirement applies here.
+  if ! git add -f -- "$run_dir"; then
     echo "ledger: refuse — persist-base: could not stage '$run_dir' on '$base'" >&2
     _return_or_halt "$cur" "$base" "staging '$run_dir' on '$base' failed"
     exit 2

@@ -36,6 +36,14 @@ a top-level `{"content":"..."}`). A record can name a unit and describe an evide
 oracle *verdict*; it can never carry the unit's actual text. A violation refuses with exit 2
 before anything is written — there is no code path that writes a partial or forbidden record.
 
+**Caveat: the floor is key-name-based, not content-aware.** It blocks the five forbidden
+*keys* above at any depth; it does not inspect the *values* of other fields. Free-text
+fields the schema allows elsewhere — `reason` on an `oracle-blind` [`probe`](#probe),
+`recommendation` on a [`proposal`](#proposal-not-currently-emitted) — are agent-discipline,
+not mechanically content-bounded: nothing stops an agent from writing code or file contents
+into `reason` or `recommendation` itself. The floor's guarantee is "no code/diff/content can
+enter under those key names," not "no field can ever contain code."
+
 ## Record types at a glance
 
 | type | who writes it | carries `git_sha`? |

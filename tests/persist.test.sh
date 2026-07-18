@@ -133,3 +133,26 @@ test_persist_base_refuses_on_detached_head() {
   [ "$head_after" = "$sha" ] || fail "refuse path must not move HEAD off the detached commit (now '$head_after')"
   rm -rf "$d"
 }
+
+# Review fix: committed mode (the default) must still work when .house-cleaning/ is
+# git-ignored — reproduces the v1-upgrader state (v1's cull.sh wrote .house-cleaning/ to
+# .git/info/exclude in every repo it cleaned) and the post-local-mode state (this file's
+# own local mode does the same via _ensure_local_ignore). A plain `git add` on an
+# explicitly-ignored path errors out (verified empirically), so without `-f` this silently
+# breaks the durable-committed-audit default for anyone who ever ran local mode or is
+# upgrading from v1.
+test_committed_mode_works_when_house_cleaning_is_gitignored() {
+  local d; d="$(_mk_repo_on_branch)"
+  ( cd "$d" && echo '.house-cleaning/' >> .git/info/exclude
+    HC_LEDGER_MODE=committed bash "$LEDGER" init r1 . x >/dev/null
+    HC_LEDGER_MODE=committed bash "$LEDGER" append r1 probe '{"unit":"a.ts","verdict":"provably-dead"}'
+    HC_LEDGER_MODE=committed bash "$LEDGER" checkpoint r1 )
+  ( cd "$d" && git show HEAD:.house-cleaning/runs/r1/ledger.jsonl >/dev/null 2>&1 ) \
+    || fail "checkpoint must commit the run dir even when .house-cleaning/ is git-ignored"
+  ( cd "$d" && HC_LEDGER_MODE=committed bash "$LEDGER" persist-base main r1 )
+  local content
+  content="$( cd "$d" && git show "main:.house-cleaning/runs/r1/ledger.jsonl" 2>&1 )" \
+    || fail "persist-base must land the run dir on base even when .house-cleaning/ is git-ignored (got: $content)"
+  echo "$content" | grep -q '"unit":"a.ts"' || fail "ledger file on base (gitignored case) is missing the appended record"
+  rm -rf "$d"
+}

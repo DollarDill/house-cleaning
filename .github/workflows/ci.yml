@@ -16,4 +16,4 @@ jobs:
           desc=$(sed -n 's/^description:[[:space:]]*//p' "$F" | head -1)
           echo "$desc" | grep -qiE '\b(I|we|you|your|yours|our|ours|us|my|me)\b' && exit 1
           [ "$(grep -c '' "$F")" -lt 500 ] || exit 1
-          ! grep -rnE 'ADR-[0-9]|\.internal/|decisions/' skills/ README.md
+          ! grep -rnE 'ADR-[0-9]|\.internal/|decisions/|cc-eval-' skills/ README.md

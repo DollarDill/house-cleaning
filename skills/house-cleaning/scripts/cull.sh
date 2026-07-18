@@ -72,7 +72,7 @@ probe_bisect() {
 _try_set() { local p rc=0; for p in "$@"; do rm -- "$p"; done; oracle || rc=$?; for p in "$@"; do restore "$p"; done; return "$rc"; }
 # $1 = git_sha (computed ONCE at the batch entry by probe_batch and threaded through every
 # recursive call below — NOT recomputed per call — so correctness is structural and doesn't
-# depend on "nothing commits mid-batch" staying true forever; review fix cc-eval-vmk3), $2.. =
+# depend on "nothing commits mid-batch" staying true forever; review fix), $2.. =
 # the candidate paths for this ddmin round.
 _ddmin() {
   local gs="$1"; shift

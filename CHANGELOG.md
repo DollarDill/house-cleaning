@@ -35,6 +35,9 @@ without review, that behavior no longer exists.
   team-visible, versioned, and survives an abandoned cleanup even if the
   deletions themselves never merge. A `local` mode remains available as a
   no-commit, gitignored escape hatch (`HC_LEDGER_MODE=local`).
+  Committed mode force-adds its own `.house-cleaning/` ledger, so it still
+  works even if a prior v1 run or a prior `local`-mode run left
+  `.house-cleaning/` git-ignored in this repo.
   See `skills/house-cleaning/references/ledger-schema.md` for the full record
   schema.
 - **No-content security floor, enforced mechanically.** Ledger records may
@@ -56,5 +59,6 @@ without review, that behavior no longer exists.
 
 ### Rationale
 
-See the forthcoming ADR (auto-apply → propose-only reversal) for the full
-context and trade-off record.
+See [ADR-0001](docs/decisions/ADR-0001-propose-only-deletion-audit.md)
+(auto-apply → propose-only reversal) for the full context and trade-off
+record.
