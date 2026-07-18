@@ -49,10 +49,44 @@ changed_since() {
   git diff --name-only "$sha" HEAD
 }
 
+# Does any recorded probe pertain to candidate unit $1 (bash 4+ regex — see plan Global
+# Constraints)? Review fix (cc-eval-vmk3): coverage MUST be counted by candidate-unit
+# MEMBERSHIP, not scalar record-count subtraction — probe_bisect/_ddmin (batch) split ONE
+# candidate into MULTIPLE leaf probe records, so "count of probe records" is not "count of
+# swept candidates" and a naive subtraction under-reports uncovered work (can print "0
+# uncovered" while a whole candidate was never touched — a false full-coverage claim, exactly
+# what "scale honesty" forbids). A file candidate is swept by ANY probe on the same file
+# (exact whole-file match, or any sub-range — bisection of a file-shaped unit still covers it).
+# A region candidate F:a-b is swept by an exact match, a sub-range fully inside [a,b], or a
+# whole-file probe on F (which trivially covers every region of F).
+_candidate_is_swept() {
+  local c="$1" probes="$2" p cfile pfile ca cb pa pb
+  cfile="$(echo "$c" | sed -E 's/:[0-9]+-[0-9]+$//')"
+  ca=""; cb=""
+  if [[ "$c" =~ :([0-9]+)-([0-9]+)$ ]]; then ca="${BASH_REMATCH[1]}"; cb="${BASH_REMATCH[2]}"; fi
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    pfile="$(echo "$p" | sed -E 's/:[0-9]+-[0-9]+$//')"
+    [ "$pfile" = "$cfile" ] || continue
+    [ -z "$ca" ] && return 0   # file candidate: any same-file probe counts as examined
+    pa=""; pb=""
+    if [[ "$p" =~ :([0-9]+)-([0-9]+)$ ]]; then pa="${BASH_REMATCH[1]}"; pb="${BASH_REMATCH[2]}"; fi
+    [ -z "$pa" ] && return 0   # whole-file probe covers every region of it
+    [ "$pa" -ge "$ca" ] && [ "$pb" -le "$cb" ] && return 0   # sub-range fully within [ca,cb]
+  done <<< "$probes"
+  return 1
+}
+
 coverage_summary() {
   local run_id="$1" L; L="$(_run_dir "$run_id")/ledger.jsonl"
-  local swept; swept="$(jq -s '[.[]|select(.type=="probe")]|length' "$L" 2>/dev/null || echo 0)"
-  local candidates; candidates="$(jq -s '[.[]|select(.type=="candidate")]|length' "$L" 2>/dev/null || echo 0)"
+  local cand_list; cand_list="$(jq -r 'select(.type=="candidate")|.unit' "$L" 2>/dev/null | sort -u || true)"
+  local probe_list; probe_list="$(jq -r 'select(.type=="probe")|.unit' "$L" 2>/dev/null || true)"
+  local candidates=0 swept=0 c
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    candidates=$((candidates + 1))
+    _candidate_is_swept "$c" "$probe_list" && swept=$((swept + 1))
+  done <<< "$cand_list"
   local uncovered=$(( candidates - swept )); [ "$uncovered" -lt 0 ] && uncovered=0
   echo "coverage: swept ${swept} of ${candidates} candidates; ${uncovered} uncovered$( [ "$uncovered" -gt 0 ] && echo ' — run again to continue' )"
 }

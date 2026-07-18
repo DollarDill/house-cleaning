@@ -57,6 +57,48 @@ test_coverage_summary_reports_zero_uncovered_when_fully_swept() {
   rm -rf "$d"
 }
 
+# Regression (review finding, cc-eval-vmk3): coverage-summary must count by CANDIDATE-UNIT
+# MEMBERSHIP, not scalar (candidate-records - probe-records) subtraction — probe_bisect/_ddmin
+# emit MULTIPLE leaf probe records for a SINGLE candidate (bisection splits one region/batch
+# into several leaf verdicts), so raw subtraction under-reports uncovered work. Reproduces the
+# reviewer's exact scenario: 2 candidates (a region that gets bisected into 2 leaf records, and
+# a file that is never probed at all); scalar subtraction would wrongly print "0 uncovered"
+# (2 candidate records - 2 probe records = 0) even though other.ts was never examined — a false
+# full-coverage report, exactly what "scale honesty" forbids.
+test_coverage_summary_counts_by_candidate_membership_not_record_count() {
+  local d; d="$(_mk_repo_on_branch)"
+  ( cd "$d" \
+      && printf 'const DEAD = 1; // dead\nexport const LIVE = 1;\n' > combo.ts \
+      && git add combo.ts && git commit -qm "add combo.ts" )
+  printf "grep -q 'LIVE = 1' combo.ts\n" > "$d/.house-cleaning/oracle"
+  ( cd "$d" && HC_RUN_ID=r1 bash "$LEDGER" init r1 . x >/dev/null
+    HC_RUN_ID=r1 bash "$LEDGER" append r1 candidate '{"unit":"combo.ts:1-2","granularity":"region","evidence":["dce"],"tier":"HIGH","source":"dce"}'
+    HC_RUN_ID=r1 bash "$LEDGER" append r1 candidate '{"unit":"other.ts","granularity":"file","evidence":["knip"],"tier":"HIGH","source":"knip"}'
+    # Whole-region oracle check [1,2] is RED (removing both lines removes the live one too) ⇒
+    # probe_bisect recurses into TWO leaf records (combo.ts:1-1, combo.ts:2-2) for this ONE
+    # candidate — the multi-record-per-candidate case the fix must handle.
+    HC_RUN_ID=r1 bash "$CULL" probe bisect combo.ts 1 2 HIGH ) || true
+  local n; n="$( cd "$d" && jq -rs '[.[]|select(.type=="probe")]|length' .house-cleaning/runs/r1/ledger.jsonl )"
+  [ "$n" -ge 2 ] || fail "setup invariant broken: expected >=2 leaf probe records for 1 candidate, got $n"
+  local out; out="$( cd "$d" && bash "$LEDGER" coverage-summary r1 )"
+  echo "$out" | grep -q "1 uncovered" || fail "other.ts was never probed — expected 1 uncovered (multi-record bisect must not be mistaken for full coverage): $out"
+  echo "$out" | grep -qi "run again" || fail "partial coverage must prompt continuation: $out"
+  rm -rf "$d"
+}
+
+# Lock-in: the simple 1-candidate/1-probe exact-match case (whole-file candidate swept by a
+# whole-file probe) must keep working under the unit-membership redesign.
+test_coverage_summary_file_candidate_swept_by_exact_whole_file_probe() {
+  local d; d="$(_mk_repo_on_branch)"
+  ( cd "$d" && HC_RUN_ID=r1 bash "$LEDGER" init r1 . x >/dev/null
+    HC_RUN_ID=r1 bash "$LEDGER" append r1 candidate '{"unit":"a.ts","granularity":"file","evidence":["knip"],"tier":"HIGH","source":"knip"}'
+    HC_RUN_ID=r1 bash "$LEDGER" append r1 probe '{"unit":"a.ts","granularity":"file","verdict":"kept-live"}' )
+  local out; out="$( cd "$d" && bash "$LEDGER" coverage-summary r1 )"
+  echo "$out" | grep -q "swept 1 of 1" || fail "exact whole-file match should count as swept: $out"
+  echo "$out" | grep -q "0 uncovered" || fail "exact whole-file match should leave 0 uncovered: $out"
+  rm -rf "$d"
+}
+
 # --- git_sha on ALL probe records (brief item 3): bisect and batch previously omitted it ---
 
 test_probe_bisect_records_carry_git_sha() {
@@ -128,6 +170,15 @@ test_coverage_view_since_omits_units_missing_git_sha() {
     HC_RUN_ID=r1 bash "$LEDGER" append r1 probe '{"unit":"a.ts","granularity":"file","verdict":"kept-live"}' )
   local view; view="$( cd "$d" && bash "$LEDGER" coverage-view --since )"
   echo "$view" | jq -e 'has("a.ts")' >/dev/null && fail "unit with no recorded git_sha must be omitted from --since view (can't confirm freshness): $view"
+  rm -rf "$d"
+}
+
+test_coverage_view_since_omits_units_with_malformed_git_sha() {
+  local d; d="$(_mk_repo_on_branch)"
+  ( cd "$d" && HC_RUN_ID=r1 bash "$LEDGER" init r1 . x >/dev/null
+    HC_RUN_ID=r1 bash "$LEDGER" append r1 probe '{"unit":"a.ts","granularity":"file","verdict":"kept-live","git_sha":"not-a-real-revision-1234"}' )
+  local view; view="$( cd "$d" && bash "$LEDGER" coverage-view --since )"
+  echo "$view" | jq -e 'has("a.ts")' >/dev/null && fail "unit with an unresolvable/malformed git_sha must be omitted (fail closed — can't confirm freshness): $view"
   rm -rf "$d"
 }
 

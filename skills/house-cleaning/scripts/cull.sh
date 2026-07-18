@@ -70,15 +70,21 @@ probe_bisect() {
 # nonzero=red=bash-false) so `if _try_set; then <provably-dead>` triggers on green as intended.
 # The `oracle || rc=$?` form (rather than a bare `oracle`) keeps this safe under `set -e`.
 _try_set() { local p rc=0; for p in "$@"; do rm -- "$p"; done; oracle || rc=$?; for p in "$@"; do restore "$p"; done; return "$rc"; }
-_ddmin() { [ "$#" -eq 0 ] && return 0
-  local gs; gs="$(sha)"
+# $1 = git_sha (computed ONCE at the batch entry by probe_batch and threaded through every
+# recursive call below — NOT recomputed per call — so correctness is structural and doesn't
+# depend on "nothing commits mid-batch" staying true forever; review fix cc-eval-vmk3), $2.. =
+# the candidate paths for this ddmin round.
+_ddmin() {
+  local gs="$1"; shift
+  [ "$#" -eq 0 ] && return 0
   if _try_set "$@"; then local p; for p in "$@"; do led probe "$(jq -nc --arg u "$p" --arg g "$gs" '{unit:$u,granularity:"file",verdict:"provably-dead",oracle:"green",git_sha:$g}')"; done; return 0; fi
   if [ "$#" -eq 1 ]; then led probe "$(jq -nc --arg u "$1" --arg g "$gs" '{unit:$u,granularity:"file",verdict:"kept-live",oracle:"red",git_sha:$g}')"; return 0; fi
   local half=$(( $# / 2 )); local -a first=( "${@:1:half}" ) second=( "${@:half+1}" )
-  _ddmin "${second[@]}"; _ddmin "${first[@]}"; }
+  _ddmin "$gs" "${second[@]}"; _ddmin "$gs" "${first[@]}"; }
 probe_batch() { local list="$1"; guard; local -a paths=(); local p
   while IFS= read -r p; do [ -n "$p" ] || continue; all_guards "$p"; paths+=( "$p" ); done < "$list"
-  [ "${#paths[@]}" -gt 0 ] || { echo "cull: empty batch list" >&2; exit 2; }; _ddmin "${paths[@]}"; }
+  [ "${#paths[@]}" -gt 0 ] || { echo "cull: empty batch list" >&2; exit 2; }
+  local gs; gs="$(sha)"; _ddmin "$gs" "${paths[@]}"; }
 
 # --- APPLY (Task 3): human-authorized manifest → oracle → atomic commit. NEVER deletes a
 # unit without a decision:approved ledger record (the "never auto-delete" boundary) — that
