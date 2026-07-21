@@ -86,6 +86,36 @@ test_stickiness_and_sanitization() {
   ) || exit 1; rm -rf "$tmp"; echo "ok: stickiness+sanitization"
 }
 
+# T2 (cc-eval-mvyyg Task 2): lazy-init (fresh-only) + current-run reinit repoint.
+# (a) `append` with NO prior init at all (no run dir exists) auto-creates the run dir +
+#     a lazy "run" record and writes the caller's record — no "not initialized" refusal.
+#     Invoked with an explicit empty run-id arg so it must resolve via HC_RUN_ID
+#     (Task 1's `_resolve_run_id` path), never treating the `type` arg as a run id.
+# (c) lazy-init is scoped to "no run dir exists AT ALL for the resolved id" — it must
+#     never redirect into, or mutate, a *different* pre-existing (stale) run dir: here a
+#     run "2026-07-22-0800" is init'd first (stale), current-run is then repointed at a
+#     brand-new uninitialized id "2026-07-22-0930", and a fresh-shell append (HC_RUN_ID
+#     unset) must lazy-init ONLY the new id's dir, leaving the stale run byte-identical.
+# (b) a second `init` overwrites .house-cleaning/current-run with the new id.
+test_lazy_init_and_reinit() {
+  local tmp; tmp="$(mktemp -d)"; ( cd "$tmp" && git init -q
+    [ ! -d .house-cleaning/runs ] || { echo FAIL precondition-runs-exists; exit 1; }
+    HC_RUN_ID=2026-07-22-0900 bash "$LEDGER" append "" candidate '{"unit":"a.js"}'
+    [ -f .house-cleaning/runs/2026-07-22-0900/ledger.jsonl ] || { echo FAIL lazy-init; exit 1; }
+    grep -q '"unit":"a.js"' .house-cleaning/runs/2026-07-22-0900/ledger.jsonl || { echo FAIL lazy-init-record; exit 1; }
+
+    bash "$LEDGER" init 2026-07-22-0800 repo-root none   # unrelated earlier run -> now "stale"
+    local stale_before; stale_before="$(cat .house-cleaning/runs/2026-07-22-0800/ledger.jsonl)"
+    printf '%s' '2026-07-22-0930' > .house-cleaning/current-run   # repoint at a NEW, uninitialized id
+    env -u HC_RUN_ID bash "$LEDGER" append "" candidate '{"unit":"b.js"}'
+    [ -f .house-cleaning/runs/2026-07-22-0930/ledger.jsonl ] || { echo FAIL lazy-init-new-current; exit 1; }
+    [ "$(cat .house-cleaning/runs/2026-07-22-0800/ledger.jsonl)" = "$stale_before" ] || { echo FAIL stale-run-mutated; exit 1; }
+
+    bash "$LEDGER" init 2026-07-22-1000 repo-root none
+    [ "$(cat .house-cleaning/current-run)" = "2026-07-22-1000" ] || { echo FAIL reinit-repoint; exit 1; }
+  ) || exit 1; rm -rf "$tmp"; echo "ok: lazy-init+reinit"
+}
+
 # T1 follow-up (review fix): a future reordering of init() (mkdir before validate) could
 # silently reintroduce the traversal bug undetected — no existing test pinned that
 # ordering directly. For each unsafe run id, `init` must refuse (exit != 0) AND must not

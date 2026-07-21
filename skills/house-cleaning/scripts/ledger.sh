@@ -56,8 +56,25 @@ init() {
 }
 
 append() {
-  local run_id="$1" type="$2" fields="$3" dir; dir="$(_run_dir "$run_id")"
-  [ -d "$dir" ] || { echo "ledger: refuse — run '$run_id' not initialized" >&2; exit 2; }
+  local run_id="${1:-}" type="${2:-}" fields="${3:-}" dir
+  if [ -z "$run_id" ]; then
+    # No explicit run id given: resolve via Task-1 stickiness (HC_RUN_ID, else
+    # .house-cleaning/current-run) so a fresh shell with HC_RUN_ID unset but a prior
+    # `init` still appends to the right run.
+    run_id="$(_resolve_run_id 2>/dev/null)" || run_id=""
+  fi
+  [ -n "$run_id" ] || run_id="$(date -u +%Y-%m-%d-%H%M%S)"   # nothing resolvable: default fresh id
+  dir="$(_run_dir "$run_id")"
+  if [ ! -d "$dir" ]; then
+    # Lazy-init, fresh-only: fires ONLY when NO run dir exists at all for the resolved
+    # id. This must NEVER reuse/redirect a resolved-but-uninitialized pointer into a
+    # different, stale run dir — the check above is against THIS id's own dir, so a
+    # stale run under another id is never touched.
+    _valid_run_id "$run_id" || { echo "ledger: refuse — unsafe run id" >&2; exit 2; }
+    mkdir -p "$dir"
+    jq -nc --arg r "$run_id" --arg t "$(date -u +%FT%TZ)" \
+       '{type:"run",run_id:$r,ts:$t,lazy:true}' >> "$dir/ledger.jsonl"
+  fi
   # No-content rule: reject forbidden keys anywhere in the fields object, at ANY depth —
   # top-level or nested inside any sub-object (e.g. {"evidence":{"content":"..."}}) — so no
   # secret or file content can enter committed artifacts via a nested field.
