@@ -5,7 +5,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HC_DIR=".house-cleaning"
 oracle() { "$SCRIPT_DIR/oracle.sh" run >/dev/null; }
-led() { HC_LEDGER_MODE="${HC_LEDGER_MODE:-committed}" bash "$SCRIPT_DIR/ledger.sh" append "$(bash "$SCRIPT_DIR/ledger.sh" resolve-run-id)" "$@"; }
+led() {
+  local rid
+  rid="$(bash "$SCRIPT_DIR/ledger.sh" resolve-run-id)" || { echo "cull: refuse — could not resolve run id" >&2; return 2; }
+  HC_LEDGER_MODE="${HC_LEDGER_MODE:-committed}" bash "$SCRIPT_DIR/ledger.sh" append "$rid" "$@"
+}
 sha() { git rev-parse HEAD; }
 
 guard() {

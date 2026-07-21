@@ -240,6 +240,34 @@ test_probe_still_refuses_off_house_cleaning_branch_with_no_env_run_id() {
   rm -rf "$d"
 }
 
+# --- led() must be fail-closed: an unresolved/rejected run id must refuse the WHOLE probe,
+# never fall through into append()'s own permissive lazy-default (which would otherwise
+# fabricate a fresh timestamp-id "orphan" run and silently succeed — misattributing the
+# ledger record instead of refusing). restore() already ran before led() in every probe
+# path, so dead.ts is untouched either way; the assertion here is about the EXIT CODE and
+# the absence of a fabricated run dir, not file safety. ---
+
+test_probe_refuses_when_no_active_run_and_creates_no_orphan() {
+  local d; d="$(_mk_repo_on_branch)"
+  # No `ledger.sh init` at all: no .house-cleaning/current-run, HC_RUN_ID unset.
+  local rc=0
+  ( cd "$d" && env -u HC_RUN_ID bash "$CULL" probe file dead.ts HIGH ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || fail "probe with no active run (no init, no HC_RUN_ID) must refuse (got 0)"
+  [ -d "$d/.house-cleaning/runs" ] && fail "probe with no active run must not fabricate an orphan runs/ dir"
+  ( cd "$d" && test -f dead.ts ) || fail "dead.ts must be untouched"
+  rm -rf "$d"
+}
+
+test_probe_refuses_rejected_env_run_id_and_creates_no_orphan() {
+  local d; d="$(_mk_repo_on_branch)"
+  local rc=0
+  ( cd "$d" && HC_RUN_ID='../../etc' bash "$CULL" probe file dead.ts HIGH ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || fail "probe with a rejected HC_RUN_ID ('../../etc') must refuse (got 0)"
+  [ -d "$d/.house-cleaning/runs" ] && fail "probe with a rejected HC_RUN_ID must not fabricate an orphan runs/ dir"
+  ( cd "$d" && test -f dead.ts ) || fail "dead.ts must be untouched"
+  rm -rf "$d"
+}
+
 # --- apply is Task 3: confirm the stub fails cleanly and does not mutate anything ---
 
 test_probe_apply_stub_fails_cleanly() {
