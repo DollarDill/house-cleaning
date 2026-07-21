@@ -116,6 +116,52 @@ test_lazy_init_and_reinit() {
   ) || exit 1; rm -rf "$tmp"; echo "ok: lazy-init+reinit"
 }
 
+# T2 review fix (Important, spec review): `_valid_run_id` must run UNCONDITIONALLY once
+# `run_id` is finalized, BEFORE the lazy-init `[ ! -d "$dir" ]` test — not only inside that
+# branch. Bug: when an explicit unsafe run id's target dir HAPPENS TO ALREADY EXIST (e.g. a
+# repo that legitimately has an `etc/` directory two levels above `.house-cleaning/runs/`,
+# or `.` which resolves to `.house-cleaning/runs` itself as soon as any run has ever been
+# created), the old `if [ ! -d "$dir" ]` guard was skipped entirely — so `_valid_run_id`
+# never ran and a record was written OUTSIDE `.house-cleaning/runs/` with no sanitization
+# (empirically: after any `init`, pre-creating `etc/` then `append '../../etc' ...` wrote
+# `etc/ledger.jsonl` at exit 0). This test reproduces that exact precondition — the target
+# dir for each unsafe id is created FIRST — and asserts the (now-hoisted) guard still
+# refuses and writes nothing into it.
+test_append_sanitizes_run_id_even_when_target_dir_preexists() {
+  local tmp; tmp="$(mktemp -d)"; ( cd "$tmp" && git init -q
+    bash "$LEDGER" init legit-run repo-root none
+    for bad in '../../etc' '/etc' '-rf' '.' '_foo'; do
+      local target=".house-cleaning/runs/$bad"
+      mkdir -p "$target"   # simulate the reported precondition: the target already exists
+      if bash "$LEDGER" append "$bad" probe '{"unit":"x"}' 2>/dev/null; then
+        echo "FAIL unsafe-accepted-preexisting-dir: $bad"; exit 1
+      fi
+      [ ! -f "$target/ledger.jsonl" ] || { echo "FAIL unsafe-wrote-record: $bad"; exit 1; }
+    done
+    # the concrete historical escape target: two levels above runs/ is the repo root, so
+    # '../../etc' must never land a ledger file at "$tmp/etc/ledger.jsonl".
+    [ ! -f "$tmp/etc/ledger.jsonl" ] || { echo "FAIL traversal-escaped-top-level: etc/ledger.jsonl exists"; exit 1; }
+    # the legit run's own ledger must be untouched by any of the rejected attempts.
+    grep -q '"type":"run"' .house-cleaning/runs/legit-run/ledger.jsonl || { echo FAIL legit-run-corrupted; exit 1; }
+  ) || exit 1; rm -rf "$tmp"; echo "ok: append-sanitizes-even-when-dir-exists"
+}
+
+# T2 review fix (Minor, spec review): the truly-blank fallback (no explicit run id, no
+# HC_RUN_ID, no .house-cleaning/current-run at all) was implemented but never exercised by
+# a test — cover it explicitly: it must succeed (exit 0) and auto-create a run dir whose
+# name matches the UTC-timestamp default shape (YYYY-MM-DD-HHMMSS), not merely "some dir".
+test_append_blank_id_falls_back_to_timestamp_default() {
+  local tmp; tmp="$(mktemp -d)"; ( cd "$tmp" && git init -q
+    [ ! -f .house-cleaning/current-run ] || { echo FAIL precondition-current-run-exists; exit 1; }
+    if ! env -u HC_RUN_ID bash "$LEDGER" append "" candidate '{"unit":"a.js"}'; then
+      echo FAIL blank-id-fallback-nonzero-exit; exit 1
+    fi
+    local found; found="$(find .house-cleaning/runs -mindepth 1 -maxdepth 1 -type d \
+      -name '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' 2>/dev/null)"
+    [ -n "$found" ] || { echo FAIL blank-id-no-timestamp-dir; exit 1; }
+  ) || exit 1; rm -rf "$tmp"; echo "ok: blank-id-fallback"
+}
+
 # T1 follow-up (review fix): a future reordering of init() (mkdir before validate) could
 # silently reintroduce the traversal bug undetected — no existing test pinned that
 # ordering directly. For each unsafe run id, `init` must refuse (exit != 0) AND must not

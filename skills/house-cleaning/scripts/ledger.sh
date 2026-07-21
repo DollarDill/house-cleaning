@@ -64,13 +64,19 @@ append() {
     run_id="$(_resolve_run_id 2>/dev/null)" || run_id=""
   fi
   [ -n "$run_id" ] || run_id="$(date -u +%Y-%m-%d-%H%M%S)"   # nothing resolvable: default fresh id
+  # Validate UNCONDITIONALLY here, before _run_dir/-d — never only inside the lazy-init
+  # branch below. If the id's target dir HAPPENS TO ALREADY EXIST (e.g. a repo that
+  # legitimately has an `etc/` dir two levels above runs/, or '.' which resolves to
+  # runs/ itself once any run exists), skipping validation there would let an unsafe id
+  # write a record outside `.house-cleaning/runs/` with no sanitization at all — the
+  # `-d` test must never gate whether sanitization happens.
+  _valid_run_id "$run_id" || { echo "ledger: refuse — unsafe run id" >&2; exit 2; }
   dir="$(_run_dir "$run_id")"
   if [ ! -d "$dir" ]; then
     # Lazy-init, fresh-only: fires ONLY when NO run dir exists at all for the resolved
     # id. This must NEVER reuse/redirect a resolved-but-uninitialized pointer into a
     # different, stale run dir — the check above is against THIS id's own dir, so a
     # stale run under another id is never touched.
-    _valid_run_id "$run_id" || { echo "ledger: refuse — unsafe run id" >&2; exit 2; }
     mkdir -p "$dir"
     jq -nc --arg r "$run_id" --arg t "$(date -u +%FT%TZ)" \
        '{type:"run",run_id:$r,ts:$t,lazy:true}' >> "$dir/ledger.jsonl"
