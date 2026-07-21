@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HC_DIR=".house-cleaning"
 oracle() { "$SCRIPT_DIR/oracle.sh" run >/dev/null; }
-led() { HC_LEDGER_MODE="${HC_LEDGER_MODE:-committed}" bash "$SCRIPT_DIR/ledger.sh" append "${HC_RUN_ID:?HC_RUN_ID unset}" "$@"; }
+led() { HC_LEDGER_MODE="${HC_LEDGER_MODE:-committed}" bash "$SCRIPT_DIR/ledger.sh" append "$(bash "$SCRIPT_DIR/ledger.sh" resolve-run-id)" "$@"; }
 sha() { git rev-parse HEAD; }
 
 guard() {
@@ -91,7 +91,9 @@ probe_batch() { local list="$1"; guard; local -a paths=(); local p
 # check is an accident-guard on top of the forced human-approval turn upstream, not the
 # boundary itself. ---
 _is_approved() { # unit → 0 iff the unit's LATEST decision record (last one wins) is "approved"
-  local unit="$1" L="$HC_DIR/runs/${HC_RUN_ID:?}/ledger.jsonl"
+  local unit="$1" rid
+  rid="$(bash "$SCRIPT_DIR/ledger.sh" resolve-run-id)" || return 1
+  local L="$HC_DIR/runs/$rid/ledger.jsonl"
   [ -f "$L" ] || return 1
   jq -e -s --arg u "$unit" \
     'map(select(.type=="decision" and .unit==$u)) | length > 0 and .[-1].decision == "approved"' \
@@ -106,8 +108,9 @@ _commit() {
 }
 
 apply_cmd() {
-  local list="$1"; guard
+  local list="$1" rid; guard
   [ -r "$list" ] || { echo "cull: refuse — manifest '$list' not found or unreadable" >&2; exit 2; }
+  rid="$(bash "$SCRIPT_DIR/ledger.sh" resolve-run-id)" || { echo "cull: refuse — could not resolve run id" >&2; exit 2; }
   local p n=0
   # First pass: guard + approval-check EVERY unit before touching anything (never-auto-delete
   # boundary — if any unit in the manifest lacks approval, refuse before deleting anything).
@@ -125,7 +128,7 @@ apply_cmd() {
       # sha is PENDING pre-commit (chicken-and-egg: the real sha doesn't exist until after
       # this commit) — kept minimal per plan note; the true sha is derivable from `git log`.
       led applied "$(jq -nc --arg u "$p" --arg s "PENDING" '{unit:$u,sha:$s}')"
-      _commit "$p [file]" "$p" "$HC_DIR/runs/${HC_RUN_ID}/ledger.jsonl"
+      _commit "$p [file]" "$p" "$HC_DIR/runs/$rid/ledger.jsonl"
     else
       restore "$p"; echo "cull: HALT — applying '$p' broke the oracle (restored)" >&2; exit 3
     fi
