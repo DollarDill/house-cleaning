@@ -62,8 +62,10 @@ test_regen_audit_from_ledger_only() {
 
 # T1 (cc-eval-aeut4): run-id stickiness (init writes .house-cleaning/current-run;
 # resolve-run-id subcommand reads it back in a fresh shell with HC_RUN_ID unset) +
-# allowlist sanitization (traversal / absolute / leading-dash / dot-only all rejected,
-# from both the current-run file AND HC_RUN_ID).
+# allowlist sanitization (traversal / absolute / leading-dash / dot-only / leading-
+# underscore all rejected, from both the current-run file AND HC_RUN_ID). Spec regex is
+# ^[A-Za-z0-9][A-Za-z0-9_-]*$ — first char must be alphanumeric, so a leading underscore
+# ('_foo', bare '_') must reject too, even though underscore is allowed mid-string.
 test_stickiness_and_sanitization() {
   local tmp; tmp="$(mktemp -d)"; ( cd "$tmp" && git init -q
     bash "$LEDGER" init 2026-07-22-1200 repo-root "$(git rev-parse HEAD 2>/dev/null || echo none)"
@@ -72,7 +74,7 @@ test_stickiness_and_sanitization() {
     local rid; rid="$(env -u HC_RUN_ID bash "$LEDGER" resolve-run-id 2>/dev/null)"
     [ "$rid" = "2026-07-22-1200" ] || { echo FAIL stickiness-resolve; exit 1; }
     # allowlist rejects each unsafe shape
-    for bad in '../../etc' '/etc' '-rf' '.'; do
+    for bad in '../../etc' '/etc' '-rf' '.' '_foo' '_'; do
       printf '%s' "$bad" > .house-cleaning/current-run
       if env -u HC_RUN_ID bash "$LEDGER" resolve-run-id 2>/dev/null; then echo "FAIL unsafe-not-rejected: $bad"; exit 1; fi
       HC_RUN_ID="$bad" bash "$LEDGER" resolve-run-id 2>/dev/null && { echo "FAIL env-unsafe: $bad"; exit 1; }
@@ -82,4 +84,26 @@ test_stickiness_and_sanitization() {
            # exit status would spuriously trip the `|| exit 1` below on a passing run —
            # every genuine FAIL path above already `exit 1`s explicitly and is unaffected.
   ) || exit 1; rm -rf "$tmp"; echo "ok: stickiness+sanitization"
+}
+
+# T1 follow-up (review fix): a future reordering of init() (mkdir before validate) could
+# silently reintroduce the traversal bug undetected — no existing test pinned that
+# ordering directly. For each unsafe run id, `init` must refuse (exit != 0) AND must not
+# have created ANY filesystem entry as a side effect first — checked two ways: (a) a
+# whole-tree top-level snapshot (excluding .git) taken once before the loop must be
+# byte-identical after every rejected attempt, and (b) the concrete historical escape
+# target for '../../etc' (a mkdir -p of ".house-cleaning/runs/../../etc" resolves to
+# "$d/etc", two levels above runs/) is explicitly asserted absent.
+test_init_refuses_unsafe_run_id_before_any_mkdir() {
+  local d; d="$(mktemp -d)"; ( cd "$d" && git init -q )
+  local baseline; baseline="$(cd "$d" && find . -mindepth 1 -not -path './.git*' -not -path './.git' | sort)"
+  for bad in '../../etc' '/etc' '-rf' '.' '_foo' '_'; do
+    if ( cd "$d" && bash "$LEDGER" init "$bad" scope sha ) 2>/dev/null; then
+      fail "init accepted unsafe run id: '$bad'"
+    fi
+  done
+  local after; after="$(cd "$d" && find . -mindepth 1 -not -path './.git*' -not -path './.git' | sort)"
+  [ "$baseline" = "$after" ] || fail "init created filesystem entries for an unsafe run id before refusing (baseline vs after differ)"
+  [ ! -e "$d/etc" ] || fail "init traversal escaped: '$d/etc' was created for run id '../../etc'"
+  rm -rf "$d"
 }

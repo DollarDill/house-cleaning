@@ -23,13 +23,15 @@ _ensure_local_ignore() {
 # is active without re-exporting HC_RUN_ID every time.
 _current_run_file() { echo "$HC_DIR/current-run"; }
 
-# Strict ALLOWLIST (not a denylist — traversal/absolute/leading-dash/control-char
-# shapes are rejected by construction, not enumerated): ^[A-Za-z0-9][A-Za-z0-9_-]*$,
-# length <= 64. Run ids flow into _run_dir() as a raw path segment, so anything but a
-# tight allowlist is a path-traversal / arg-injection vector (untrusted-repo input).
+# Strict ALLOWLIST (not a denylist — traversal/absolute/leading-dash/leading-underscore/
+# control-char shapes are rejected by construction, not enumerated):
+# ^[A-Za-z0-9][A-Za-z0-9_-]*$, length <= 64 — first char must be alphanumeric (underscore
+# is allowed mid-string but not as the leading char). Run ids flow into _run_dir() as a
+# raw path segment, so anything but a tight allowlist is a path-traversal / arg-injection
+# vector (untrusted-repo input).
 _valid_run_id() {
   case "$1" in
-    *[!A-Za-z0-9_-]*|-*|'') return 1 ;;
+    *[!A-Za-z0-9_-]*|-*|_*|'') return 1 ;;
     *) [ "${#1}" -le 64 ] ;;
   esac
 }
