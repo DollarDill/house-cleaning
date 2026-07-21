@@ -29,16 +29,27 @@ repo is cleaned incrementally across runs.
 - Approved deletions land as atomic, oracle-verified commits on a `house-cleaning/<date>` branch; **never merge red**.
 - The committed ledger and audit hold identifiers + evidence-type + verdict only — never file contents, diffs, or code.
 - Carried floors (the scripts enforce these — don't restate them): clean tree (modulo `.house-cleaning/`) · `house-cleaning/*` branch only · keep-list untouchable · secret-shaped paths refuse · untracked archived before removal.
+- **Record via the ledger, not by hand.** Every candidate, probe, and proposal MUST go through `scripts/ledger.sh` / `scripts/cull.sh` so the coverage ledger exists — never substitute a hand-rolled `cp`/`rm`/manual test-run probe for those scripts.
 
-Set a run id once — `export HC_RUN_ID=<yyyy-mm-dd-hhmm>` — and every script call in this run carries it. Storage is committed by default (`HC_LEDGER_MODE=committed`); flip to `local` for a no-commit, gitignored ledger. In committed mode, flush the ledger/audit at stage boundaries with `scripts/ledger.sh checkpoint "$HC_RUN_ID"`.
+The run id set by `scripts/ledger.sh init` (Stage 0) sticks via `.house-cleaning/current-run` —
+you do NOT need to re-export `HC_RUN_ID` on every call. Storage is committed by default
+(`HC_LEDGER_MODE=committed`); flip to `local` for a no-commit, gitignored ledger. In committed
+mode, flush the ledger/audit at stage boundaries with `scripts/ledger.sh checkpoint "$HC_RUN_ID"`.
 
 ## Stage 0 — Contract
 
-1. Refuse a dirty tree (outside `.house-cleaning/`) or a non-git repo. Branch: `git checkout -b house-cleaning/<yyyy-mm-dd>` — never main.
+Copy-paste setup, one shot — the run id sticks (see above), so nothing further to export:
+
+```bash
+git checkout -b house-cleaning/<yyyy-mm-dd>
+scripts/ledger.sh init <yyyy-mm-dd-hhmm> <scope> "$(git rev-parse HEAD)"
+```
+
+1. Refuse a dirty tree (outside `.house-cleaning/`) or a non-git repo. Branch: as above — never main.
 2. Oracle: `scripts/oracle.sh detect` prints proposed commands; **show them and get the user's confirmation** before writing `.house-cleaning/oracle`. Trust boundary — the oracle executes this repo's code.
 3. Baseline: `scripts/oracle.sh run` twice. Red ⇒ stop and report. A flake ⇒ record it and demote confidence.
 4. Keep-list: read `.house-cleaning/keep`; offer to seed it (entry points, migrations, licenses).
-5. `scripts/ledger.sh init "$HC_RUN_ID" <scope> "$(git rev-parse HEAD)"`, then append the `oracle` and `baseline` records.
+5. Run the setup above, then append the `oracle` and `baseline` records.
 
 **Done when:** the ledger holds `run` + `oracle` + `baseline` records, the keep-list is read, and the `house-cleaning/<date>` branch exists.
 

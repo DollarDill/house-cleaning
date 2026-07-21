@@ -18,16 +18,69 @@ _ensure_local_ignore() {
   grep -qxF "$HC_DIR/" "$ex" 2>/dev/null || echo "$HC_DIR/" >> "$ex"
 }
 
+# Run-id stickiness: the "active run" pointer, so callers in a fresh shell (HC_RUN_ID
+# unset — the common case across separate tool invocations) can still resolve which run
+# is active without re-exporting HC_RUN_ID every time.
+_current_run_file() { echo "$HC_DIR/current-run"; }
+
+# Strict ALLOWLIST (not a denylist — traversal/absolute/leading-dash/leading-underscore/
+# control-char shapes are rejected by construction, not enumerated):
+# ^[A-Za-z0-9][A-Za-z0-9_-]*$, length <= 64 — first char must be alphanumeric (underscore
+# is allowed mid-string but not as the leading char). Run ids flow into _run_dir() as a
+# raw path segment, so anything but a tight allowlist is a path-traversal / arg-injection
+# vector (untrusted-repo input).
+_valid_run_id() {
+  case "$1" in
+    *[!A-Za-z0-9_-]*|-*|_*|'') return 1 ;;
+    *) [ "${#1}" -le 64 ] ;;
+  esac
+}
+
+# resolve-run-id: HC_RUN_ID if set, else the contents of .house-cleaning/current-run.
+# Refuses (non-zero exit, message to stderr) on an unsafe/empty shape — fail-closed.
+_resolve_run_id() {
+  local rid="${HC_RUN_ID:-}"
+  [ -n "$rid" ] || { [ -f "$(_current_run_file)" ] && rid="$(cat "$(_current_run_file)")"; }
+  _valid_run_id "$rid" || { echo "ledger: refuse — unsafe/empty run id" >&2; return 2; }
+  printf '%s' "$rid"
+}
+
 init() {
   local run_id="$1" scope="$2" git_sha="$3" dir; dir="$(_run_dir "$run_id")"
+  _valid_run_id "$run_id" || { echo "ledger: refuse — unsafe/empty run id '$run_id'" >&2; exit 2; }
   mkdir -p "$dir"
   jq -nc --arg r "$run_id" --arg s "$scope" --arg g "$git_sha" --arg t "$(date -u +%FT%TZ)" \
      '{type:"run",run_id:$r,scope:$s,git_sha:$g,ts:$t}' >> "$dir/ledger.jsonl"
+  mkdir -p "$HC_DIR"
+  printf '%s' "$run_id" > "$(_current_run_file)"
 }
 
 append() {
-  local run_id="$1" type="$2" fields="$3" dir; dir="$(_run_dir "$run_id")"
-  [ -d "$dir" ] || { echo "ledger: refuse — run '$run_id' not initialized" >&2; exit 2; }
+  local run_id="${1:-}" type="${2:-}" fields="${3:-}" dir
+  if [ -z "$run_id" ]; then
+    # No explicit run id given: resolve via Task-1 stickiness (HC_RUN_ID, else
+    # .house-cleaning/current-run) so a fresh shell with HC_RUN_ID unset but a prior
+    # `init` still appends to the right run.
+    run_id="$(_resolve_run_id 2>/dev/null)" || run_id=""
+  fi
+  [ -n "$run_id" ] || run_id="$(date -u +%Y-%m-%d-%H%M%S)"   # nothing resolvable: default fresh id
+  # Validate UNCONDITIONALLY here, before _run_dir/-d — never only inside the lazy-init
+  # branch below. If the id's target dir HAPPENS TO ALREADY EXIST (e.g. a repo that
+  # legitimately has an `etc/` dir two levels above runs/, or '.' which resolves to
+  # runs/ itself once any run exists), skipping validation there would let an unsafe id
+  # write a record outside `.house-cleaning/runs/` with no sanitization at all — the
+  # `-d` test must never gate whether sanitization happens.
+  _valid_run_id "$run_id" || { echo "ledger: refuse — unsafe run id" >&2; exit 2; }
+  dir="$(_run_dir "$run_id")"
+  if [ ! -d "$dir" ]; then
+    # Lazy-init, fresh-only: fires ONLY when NO run dir exists at all for the resolved
+    # id. This must NEVER reuse/redirect a resolved-but-uninitialized pointer into a
+    # different, stale run dir — the check above is against THIS id's own dir, so a
+    # stale run under another id is never touched.
+    mkdir -p "$dir"
+    jq -nc --arg r "$run_id" --arg t "$(date -u +%FT%TZ)" \
+       '{type:"run",run_id:$r,ts:$t,lazy:true}' >> "$dir/ledger.jsonl"
+  fi
   # No-content rule: reject forbidden keys anywhere in the fields object, at ANY depth —
   # top-level or nested inside any sub-object (e.g. {"evidence":{"content":"..."}}) — so no
   # secret or file content can enter committed artifacts via a nested field.
@@ -247,6 +300,7 @@ persist_base() {
 
 case "${1:-}" in
   init) shift; init "$@" ;;
+  resolve-run-id) _resolve_run_id ;;
   append) shift; append "$@" ;;
   coverage-view) shift; case "${1:-}" in
       "") coverage_view ;;
@@ -258,5 +312,5 @@ case "${1:-}" in
   coverage-summary) shift; coverage_summary "$@" ;;
   checkpoint) shift; checkpoint "$@" ;;
   persist-base) shift; persist_base "$@" ;;
-  *) echo "usage: ledger.sh init|append|coverage-view|regen-audit|changed-since|coverage-summary|checkpoint|persist-base ..." >&2; exit 2 ;;
+  *) echo "usage: ledger.sh init|resolve-run-id|append|coverage-view|regen-audit|changed-since|coverage-summary|checkpoint|persist-base ..." >&2; exit 2 ;;
 esac
