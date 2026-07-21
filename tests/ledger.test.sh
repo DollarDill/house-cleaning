@@ -59,3 +59,27 @@ test_regen_audit_from_ledger_only() {
   grep -q "provably-dead" "$d/.house-cleaning/runs/r1/audit.md" || fail "audit.md missing verdict"
   rm -rf "$d"
 }
+
+# T1 (cc-eval-aeut4): run-id stickiness (init writes .house-cleaning/current-run;
+# resolve-run-id subcommand reads it back in a fresh shell with HC_RUN_ID unset) +
+# allowlist sanitization (traversal / absolute / leading-dash / dot-only all rejected,
+# from both the current-run file AND HC_RUN_ID).
+test_stickiness_and_sanitization() {
+  local tmp; tmp="$(mktemp -d)"; ( cd "$tmp" && git init -q
+    bash "$LEDGER" init 2026-07-22-1200 repo-root "$(git rev-parse HEAD 2>/dev/null || echo none)"
+    [ "$(cat .house-cleaning/current-run)" = "2026-07-22-1200" ] || { echo FAIL stickiness-write; exit 1; }
+    # fresh shell, HC_RUN_ID unset -> resolves from file via the subcommand
+    local rid; rid="$(env -u HC_RUN_ID bash "$LEDGER" resolve-run-id 2>/dev/null)"
+    [ "$rid" = "2026-07-22-1200" ] || { echo FAIL stickiness-resolve; exit 1; }
+    # allowlist rejects each unsafe shape
+    for bad in '../../etc' '/etc' '-rf' '.'; do
+      printf '%s' "$bad" > .house-cleaning/current-run
+      if env -u HC_RUN_ID bash "$LEDGER" resolve-run-id 2>/dev/null; then echo "FAIL unsafe-not-rejected: $bad"; exit 1; fi
+      HC_RUN_ID="$bad" bash "$LEDGER" resolve-run-id 2>/dev/null && { echo "FAIL env-unsafe: $bad"; exit 1; }
+    done
+    true   # normalize $? to 0: the loop's last command is an EXPECTED rejection (nonzero
+           # exit) when the implementation is correct, so without this the subshell's own
+           # exit status would spuriously trip the `|| exit 1` below on a passing run —
+           # every genuine FAIL path above already `exit 1`s explicitly and is unaffected.
+  ) || exit 1; rm -rf "$tmp"; echo "ok: stickiness+sanitization"
+}

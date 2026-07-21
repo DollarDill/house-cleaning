@@ -18,11 +18,39 @@ _ensure_local_ignore() {
   grep -qxF "$HC_DIR/" "$ex" 2>/dev/null || echo "$HC_DIR/" >> "$ex"
 }
 
+# Run-id stickiness: the "active run" pointer, so callers in a fresh shell (HC_RUN_ID
+# unset — the common case across separate tool invocations) can still resolve which run
+# is active without re-exporting HC_RUN_ID every time.
+_current_run_file() { echo "$HC_DIR/current-run"; }
+
+# Strict ALLOWLIST (not a denylist — traversal/absolute/leading-dash/control-char
+# shapes are rejected by construction, not enumerated): ^[A-Za-z0-9][A-Za-z0-9_-]*$,
+# length <= 64. Run ids flow into _run_dir() as a raw path segment, so anything but a
+# tight allowlist is a path-traversal / arg-injection vector (untrusted-repo input).
+_valid_run_id() {
+  case "$1" in
+    *[!A-Za-z0-9_-]*|-*|'') return 1 ;;
+    *) [ "${#1}" -le 64 ] ;;
+  esac
+}
+
+# resolve-run-id: HC_RUN_ID if set, else the contents of .house-cleaning/current-run.
+# Refuses (non-zero exit, message to stderr) on an unsafe/empty shape — fail-closed.
+_resolve_run_id() {
+  local rid="${HC_RUN_ID:-}"
+  [ -n "$rid" ] || { [ -f "$(_current_run_file)" ] && rid="$(cat "$(_current_run_file)")"; }
+  _valid_run_id "$rid" || { echo "ledger: refuse — unsafe/empty run id" >&2; return 2; }
+  printf '%s' "$rid"
+}
+
 init() {
   local run_id="$1" scope="$2" git_sha="$3" dir; dir="$(_run_dir "$run_id")"
+  _valid_run_id "$run_id" || { echo "ledger: refuse — unsafe/empty run id '$run_id'" >&2; exit 2; }
   mkdir -p "$dir"
   jq -nc --arg r "$run_id" --arg s "$scope" --arg g "$git_sha" --arg t "$(date -u +%FT%TZ)" \
      '{type:"run",run_id:$r,scope:$s,git_sha:$g,ts:$t}' >> "$dir/ledger.jsonl"
+  mkdir -p "$HC_DIR"
+  printf '%s' "$run_id" > "$(_current_run_file)"
 }
 
 append() {
@@ -247,6 +275,7 @@ persist_base() {
 
 case "${1:-}" in
   init) shift; init "$@" ;;
+  resolve-run-id) _resolve_run_id ;;
   append) shift; append "$@" ;;
   coverage-view) shift; case "${1:-}" in
       "") coverage_view ;;
@@ -258,5 +287,5 @@ case "${1:-}" in
   coverage-summary) shift; coverage_summary "$@" ;;
   checkpoint) shift; checkpoint "$@" ;;
   persist-base) shift; persist_base "$@" ;;
-  *) echo "usage: ledger.sh init|append|coverage-view|regen-audit|changed-since|coverage-summary|checkpoint|persist-base ..." >&2; exit 2 ;;
+  *) echo "usage: ledger.sh init|resolve-run-id|append|coverage-view|regen-audit|changed-since|coverage-summary|checkpoint|persist-base ..." >&2; exit 2 ;;
 esac
