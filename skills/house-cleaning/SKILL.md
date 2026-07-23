@@ -28,17 +28,22 @@ repo is cleaned incrementally across runs.
 NO PROPOSAL WITHOUT A CANDIDATE RECORD
 ```
 
-If it never entered as a candidate, it does not leave as a proposal. Units are nominated at Stage 1 — in this run or a prior one — and carried down; they are not invented at approval time. Caught one after the fact? Drop it from the manifest and record a `kept`.
+If it never entered as a candidate, it does not leave as a proposal — either as itself, or as the coarser unit it descends from. Units are nominated at Stage 1 and carried down; they are not invented at approval time. Resuming a prior run counts: `coverage-view --since` re-nominates the units it invalidates, so they enter this run as candidates before they can be proposed. Caught one after the fact? Drop it from the manifest, append a superseding `decision:declined`, record a `kept`, and say so in the report.
 
 **Standing prohibitions**
 
 - **Never auto-delete.** No removal applies without a **forced human** approval turn (Stage 4). `cull.sh apply` runs only the human-authorized manifest.
-- Probes **always revert**: after any probe the tree is byte-identical to HEAD, and nothing is committed. Tree not byte-identical afterwards? `git checkout -- .` and re-probe — a dirty tree invalidates every verdict that follows.
+- Probes **always revert**: after any probe the tree is byte-identical to HEAD, and nothing is committed. Tree not byte-identical afterwards? Restore the **probed path only** — `git checkout -- <path>` — then re-probe; a dirty tree invalidates every verdict that follows. Never restore the whole tree: `.house-cleaning/` carries ledger records not yet checkpointed, and a repo-wide checkout discards them.
 - Approved deletions land as atomic, oracle-verified commits on a `house-cleaning/<date>` branch; **never merge red**.
 - The committed ledger and audit hold identifiers + evidence-type + verdict only — never file contents, diffs, or code.
 - **Never run `cull.sh` before Stage 0 closes.** A probe against an undetected oracle or an unverified baseline proves nothing — it produces verdicts that look identical to real ones.
 - Carried floors (the scripts enforce these — don't restate them): clean tree (modulo `.house-cleaning/`) · `house-cleaning/*` branch only · keep-list untouchable · secret-shaped paths refuse · untracked archived before removal.
 - **Record via the ledger, not by hand.** Every candidate, probe, and proposal MUST go through `scripts/ledger.sh` / `scripts/cull.sh` so the coverage ledger exists — never substitute a hand-rolled `cp`/`rm`/manual test-run probe for those scripts. Recorded by hand? The coverage ledger is wrong and resumption will lie — re-record through the script before the stage closes.
+
+The run id set by `scripts/ledger.sh init` (Stage 0) sticks via `.house-cleaning/current-run` —
+you do NOT need to re-export `HC_RUN_ID` on every call. Storage is committed by default
+(`HC_LEDGER_MODE=committed`); flip to `local` for a no-commit, gitignored ledger. In committed
+mode, flush the ledger/audit at stage boundaries with `scripts/ledger.sh checkpoint "$HC_RUN_ID"`.
 
 **If you catch yourself thinking…**
 
@@ -50,14 +55,9 @@ If it never entered as a candidate, it does not leave as a proposal. Units are n
 | "It's obviously dead — the probe is a formality" | Obvious isn't evidence. If the oracle can evaluate it, probe it. If it can't, record `oracle-blind` and say why. |
 | "I'll write up the evidence after approval" | The human approves *on* evidence. No evidence, nothing to approve. |
 | "The baseline is probably green" | Probably ≠ green. Run it. A red baseline invalidates every verdict after it. |
-| "I'm not sure, so I'll leave it out" | Silence isn't restraint — it's an uncovered unit. Record it `oracle-blind` or `kept`, with the reason. |
+| "I'm not sure, so I'll leave it out" | Silence isn't restraint — it's an uncovered unit. If the *oracle* can't see it, that's `oracle-blind` (which becomes a proposal). If *you* can't establish it's dead, that's `kept`, with the reason. Recording it is not the same as surfacing it. |
 
 Violating the letter of these lines is violating the spirit of them.
-
-The run id set by `scripts/ledger.sh init` (Stage 0) sticks via `.house-cleaning/current-run` —
-you do NOT need to re-export `HC_RUN_ID` on every call. Storage is committed by default
-(`HC_LEDGER_MODE=committed`); flip to `local` for a no-commit, gitignored ledger. In committed
-mode, flush the ledger/audit at stage boundaries with `scripts/ledger.sh checkpoint "$HC_RUN_ID"`.
 
 ## Stage 0 — Contract
 

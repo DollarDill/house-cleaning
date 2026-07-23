@@ -103,7 +103,7 @@ test_skill_forbids_cull_before_stage_0() {
   # Pattern is deliberately backtick-free: a markdown-backticked pattern trips shellcheck
   # SC2016 and is brittle if the prose is reformatted. "before Stage 0 closes" appears only
   # in this bright line, so it pins the same invariant. Verified shellcheck-clean.
-  grep -qi 'before Stage 0 closes' "$S" \
+  grep -qiE 'cull\.sh.? before Stage 0 closes' "$S" \
     || fail "SKILL.md missing the Stage-0 ordering bright line"
 }
 

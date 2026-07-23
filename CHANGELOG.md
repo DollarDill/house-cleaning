@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The **always revert** and **record via the ledger** prohibitions each now carry a
   remedy clause — what to do once the line has been crossed, not just the prohibition.
+  The always-revert remedy restores the **probed path only**; restoring the whole tree
+  would discard ledger records not yet checkpointed.
+- The section heading is now `## The boundary` (was `## The boundary (bright lines)`),
+  and its existing prohibitions sit under a `**Standing prohibitions**` label.
 
 ## 0.2.0 — BREAKING
 
