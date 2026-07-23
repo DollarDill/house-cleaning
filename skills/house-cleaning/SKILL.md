@@ -22,7 +22,15 @@ repo is cleaned incrementally across runs.
 
 **When NOT to use:** a dirty working tree, an untrusted repo (the oracle runs its code), or when you want deletions applied without review — this tool asks first, every time.
 
-## The boundary (bright lines)
+## The boundary
+
+```
+NO PROPOSAL WITHOUT A CANDIDATE RECORD
+```
+
+If it never entered as a candidate, it does not leave as a proposal. Units are nominated at Stage 1 — in this run or a prior one — and carried down; they are not invented at approval time. Caught one after the fact? Drop it from the manifest and record a `kept`.
+
+**Standing prohibitions**
 
 - **Never auto-delete.** No removal applies without a **forced human** approval turn (Stage 4). `cull.sh apply` runs only the human-authorized manifest.
 - Probes **always revert**: after any probe the tree is byte-identical to HEAD, and nothing is committed.

@@ -77,6 +77,21 @@ test_skill_stage4_requires_kept_record_for_declined_units() {
     || fail "Stage 4's Done-when does not require a 'kept' record for declined units"
 }
 
+# The Iron Law is the section's top-level gate. Pinned as an INVARIANT (the exact rule
+# string, and that it sits in a fenced block — the corpus form that makes it read as a law
+# rather than as prose), never the surrounding narrative. Anchored on CANDIDACY rather than
+# on a probe verdict: word-level prose proposals legitimately carry no probe record at all
+# (references/ledger-schema.md), so a probe-anchored law would bar a documented capability.
+test_skill_iron_law_present() {
+  local S; S="$(_skill_md)"
+  grep -qF 'NO PROPOSAL WITHOUT A CANDIDATE RECORD' "$S" \
+    || fail "SKILL.md is missing the Iron Law"
+  awk '/^```/ { f = !f; next }
+       f && /NO PROPOSAL WITHOUT A CANDIDATE RECORD/ { found = 1 }
+       END { exit !found }' "$S" \
+    || fail "Iron Law present but not inside a fenced code block"
+}
+
 test_skill_leading_words_present() {
   local S word; S="$(_skill_md)"
   # Steering vocabulary (spec §2/§3) — used consistently, greppable here.
