@@ -107,6 +107,16 @@ test_skill_forbids_cull_before_stage_0() {
     || fail "SKILL.md missing the Stage-0 ordering bright line"
 }
 
+# The rationalization table is the third tier of the boundary section. Pinned by HEADER
+# ONLY — never row contents: rows are expected to evolve as new failure modes are
+# observed, and asserting them would make the suite a prose-structure test, which the
+# authoring canon forbids. The header's presence is the invariant.
+test_skill_has_rationalization_table() {
+  local S; S="$(_skill_md)"
+  grep -qE '^\| *Thought *\| *Reality *\|' "$S" \
+    || fail "SKILL.md missing the rationalization table header"
+}
+
 test_skill_leading_words_present() {
   local S word; S="$(_skill_md)"
   # Steering vocabulary (spec §2/§3) — used consistently, greppable here.

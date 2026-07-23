@@ -40,6 +40,20 @@ If it never entered as a candidate, it does not leave as a proposal. Units are n
 - Carried floors (the scripts enforce these — don't restate them): clean tree (modulo `.house-cleaning/`) · `house-cleaning/*` branch only · keep-list untouchable · secret-shaped paths refuse · untracked archived before removal.
 - **Record via the ledger, not by hand.** Every candidate, probe, and proposal MUST go through `scripts/ledger.sh` / `scripts/cull.sh` so the coverage ledger exists — never substitute a hand-rolled `cp`/`rm`/manual test-run probe for those scripts. Recorded by hand? The coverage ledger is wrong and resumption will lie — re-record through the script before the stage closes.
 
+**If you catch yourself thinking…**
+
+| Thought | Reality |
+|---|---|
+| "It's not dead, but it's an easy win" | Out of scope. This skill removes dead code and stale prose. Not untidy code. |
+| "I'll flag it as optional, so it's honest" | Disclosing scope creep doesn't bring it in scope. Don't surface it. |
+| "I declined it, so it's handled" | A decline without a `kept` record still reads as proposed. |
+| "It's obviously dead — the probe is a formality" | Obvious isn't evidence. If the oracle can evaluate it, probe it. If it can't, record `oracle-blind` and say why. |
+| "I'll write up the evidence after approval" | The human approves *on* evidence. No evidence, nothing to approve. |
+| "The baseline is probably green" | Probably ≠ green. Run it. A red baseline invalidates every verdict after it. |
+| "I'm not sure, so I'll leave it out" | Silence isn't restraint — it's an uncovered unit. Record it `oracle-blind` or `kept`, with the reason. |
+
+Violating the letter of these lines is violating the spirit of them.
+
 The run id set by `scripts/ledger.sh init` (Stage 0) sticks via `.house-cleaning/current-run` —
 you do NOT need to re-export `HC_RUN_ID` on every call. Storage is committed by default
 (`HC_LEDGER_MODE=committed`); flip to `local` for a no-commit, gitignored ledger. In committed
