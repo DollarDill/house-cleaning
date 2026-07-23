@@ -77,6 +77,46 @@ test_skill_stage4_requires_kept_record_for_declined_units() {
     || fail "Stage 4's Done-when does not require a 'kept' record for declined units"
 }
 
+# The Iron Law is the section's top-level gate. Pinned as an INVARIANT (the exact rule
+# string, and that it sits in a fenced block — the corpus form that makes it read as a law
+# rather than as prose), never the surrounding narrative. Anchored on CANDIDACY rather than
+# on a probe verdict: word-level prose proposals legitimately carry no probe record at all
+# (references/ledger-schema.md), so a probe-anchored law would bar a documented capability.
+test_skill_iron_law_present() {
+  local S; S="$(_skill_md)"
+  grep -qF 'NO PROPOSAL WITHOUT A CANDIDATE RECORD' "$S" \
+    || fail "SKILL.md is missing the Iron Law"
+  awk '/^```/ { f = !f; next }
+       f && /NO PROPOSAL WITHOUT A CANDIDATE RECORD/ { found = 1 }
+       END { exit !found }' "$S" \
+    || fail "Iron Law present but not inside a fenced code block"
+}
+
+# Stage ordering was stated by the stage bodies but never DEFENDED. The eval showed
+# cull_run before the first oracle_detect in 3 of 4 gated scenarios. Pinned as an
+# invariant because a probe against an undetected oracle yields verdicts that are
+# indistinguishable from real ones — a silent-corruption path, not a style issue.
+# Deliberately NOT paired with a branch-ordering line: 'house-cleaning/* branch only'
+# is a carried floor the scripts enforce, and SKILL.md forbids restating those.
+test_skill_forbids_cull_before_stage_0() {
+  local S; S="$(_skill_md)"
+  # Pattern is deliberately backtick-free: a markdown-backticked pattern trips shellcheck
+  # SC2016 and is brittle if the prose is reformatted. "before Stage 0 closes" appears only
+  # in this bright line, so it pins the same invariant. Verified shellcheck-clean.
+  grep -qiE 'cull\.sh.? before Stage 0 closes' "$S" \
+    || fail "SKILL.md missing the Stage-0 ordering bright line"
+}
+
+# The rationalization table is the third tier of the boundary section. Pinned by HEADER
+# ONLY — never row contents: rows are expected to evolve as new failure modes are
+# observed, and asserting them would make the suite a prose-structure test, which the
+# authoring canon forbids. The header's presence is the invariant.
+test_skill_has_rationalization_table() {
+  local S; S="$(_skill_md)"
+  grep -qE '^\| *Thought *\| *Reality *\|' "$S" \
+    || fail "SKILL.md missing the rationalization table header"
+}
+
 test_skill_leading_words_present() {
   local S word; S="$(_skill_md)"
   # Steering vocabulary (spec §2/§3) — used consistently, greppable here.

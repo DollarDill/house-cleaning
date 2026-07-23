@@ -5,6 +5,35 @@ All notable changes to house-cleaning will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A run should now stay inside the job you asked for.** The skill holds one law —
+  `NO PROPOSAL WITHOUT A CANDIDATE RECORD` — so a unit has to be nominated and carried
+  through the pipeline before it can reach your approval turn. Tidy-ups invented at
+  approval time ("not dead, but an easy win") no longer qualify. Run `/house-cleaning`
+  as before; nothing about the stages, scripts, or ledger schema changed.
+- **The boundary now names the excuses, not just the rules.** A table of the
+  rationalizations that lead past each line — surfacing out-of-scope edits, declining a
+  unit without recording it as kept, skipping a probe because the answer seems obvious —
+  sits next to the prohibitions, so the excuse is on the page before it gets used.
+- **A run can no longer start probing before its oracle is established.** `cull.sh` is
+  off-limits until Stage 0 closes, because a probe against an undetected oracle returns
+  verdicts indistinguishable from real ones.
+
+### Changed
+
+- **A failed revert no longer costs you the audit trail.** The always-revert rule now
+  tells you to restore the probed path only (`git checkout -- <path>`); restoring the
+  whole tree would discard ledger records not yet checkpointed. The record-via-ledger
+  rule likewise says what to do once you've recorded something by hand.
+- `coverage-view --since` is now described accurately: it reports stale coverage, it
+  does not re-nominate. Re-nominating resumed units at Stage 1 is yours to do — skipping
+  it made the coverage line under-report what was left uncovered.
+- The boundary section reads top-down as law → prohibitions → rationalizations
+  (heading trimmed to `## The boundary`).
+
 ## 0.2.0 — BREAKING
 
 **Tiered auto-apply is removed. The deletion test is now propose-only and
