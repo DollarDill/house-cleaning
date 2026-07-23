@@ -28,7 +28,7 @@ repo is cleaned incrementally across runs.
 NO PROPOSAL WITHOUT A CANDIDATE RECORD
 ```
 
-If it never entered as a candidate, it does not leave as a proposal — either as itself, or as the coarser unit it descends from. Units are nominated at Stage 1 and carried down; they are not invented at approval time. Resuming a prior run counts: `coverage-view --since` re-nominates the units it invalidates, so they enter this run as candidates before they can be proposed. Caught one after the fact? Drop it from the manifest, append a superseding `decision:declined`, record a `kept`, and say so in the report.
+If it never entered as a candidate, it does not leave as a proposal — either as itself, or as the coarser unit it descends from. Units are nominated at Stage 1 and carried down; they are not invented at approval time. Resuming a prior run is no exception: `coverage-view --since` invalidates stale coverage but writes nothing — re-nominate those units yourself at Stage 1 so they carry a `candidate` record in **this** run before anything proposes them. Caught one after the fact? Drop it from the manifest, append a superseding `decision:declined`, record a `kept`, and say so in the report.
 
 **Standing prohibitions**
 
@@ -55,7 +55,7 @@ mode, flush the ledger/audit at stage boundaries with `scripts/ledger.sh checkpo
 | "It's obviously dead — the probe is a formality" | Obvious isn't evidence. If the oracle can evaluate it, probe it. If it can't, record `oracle-blind` and say why. |
 | "I'll write up the evidence after approval" | The human approves *on* evidence. No evidence, nothing to approve. |
 | "The baseline is probably green" | Probably ≠ green. Run it. A red baseline invalidates every verdict after it. |
-| "I'm not sure, so I'll leave it out" | Silence isn't restraint — it's an uncovered unit. If the *oracle* can't see it, that's `oracle-blind` (which becomes a proposal). If *you* can't establish it's dead, that's `kept`, with the reason. Recording it is not the same as surfacing it. |
+| "I'm not sure, so I'll leave it out" | Silence isn't restraint — it's an uncovered unit. If the *oracle* can't see it, that's `oracle-blind` (which becomes a proposal). If *you* can't establish it's dead, don't nominate it — record `kept` at Stage 1, with the reason. Recording it is not the same as surfacing it. |
 
 Violating the letter of these lines is violating the spirit of them.
 
@@ -125,7 +125,7 @@ Apply **only** the approved manifest. Two paths, by granularity:
 
 ## Resumption
 
-On every invocation, read the ledger to see what scope has been swept and resume the uncovered remainder: `scripts/ledger.sh coverage-view --since` invalidates coverage for files changed since their recorded sha, so changed units are re-nominated and re-probed. "Know what scope you're looking at" is just the coverage summary — this is how the tool cleans a massive repo across many runs.
+On every invocation, read the ledger to see what scope has been swept and resume the uncovered remainder: `scripts/ledger.sh coverage-view --since` invalidates coverage for files changed since their recorded sha — it reports, it does not write, so you re-nominate and re-probe those units yourself. "Know what scope you're looking at" is just the coverage summary — this is how the tool cleans a massive repo across many runs.
 
 ## Reference (branch-only)
 
