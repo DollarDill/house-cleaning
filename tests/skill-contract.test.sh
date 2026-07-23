@@ -50,6 +50,33 @@ test_skill_every_stage_has_done_when() {
   done
 }
 
+# Stage 4 must require a `kept` record for every DECLINED unit, not just a `decision` record.
+# Observed failure this closes: a run declined two out-of-scope units ("package.json (exports
+# map)" and a line-level unit inside a live file) and wrote `decision:declined` for each, but
+# no `kept` record. Downstream, a proposal set derived from the decision stream treats a
+# `kept` record as the only trustworthy retraction signal — agent-authored decision records
+# are deliberately non-retracting, so an agent cannot launder a wrongly-surfaced unit by
+# declining it. With no `kept` record those two declined units stayed in the derived proposal
+# set and scored as over-reach, blocking promotion. A third unit in the same run was declined
+# AND kept-recorded, retracted cleanly, and did not trip — which is what pinned the missing
+# record as the cause. Stage 1 already states the contract ("every in-scope unit is a
+# candidate or kept ledger record"); this pins that Stage 4 restates it at decline time,
+# which is where the ruling actually happens.
+test_skill_stage4_requires_kept_record_for_declined_units() {
+  local S slice; S="$(_skill_md)"
+  slice="$(awk '
+    $0 ~ "^## Stage 4([^0-9]|$)" { inseg=1; next }
+    inseg && /^## / { exit }
+    inseg { print }
+  ' "$S")"
+  printf '%s\n' "$slice" | grep -qi 'kept' \
+    || fail "Stage 4 never mentions a 'kept' record — a declined unit needs one or it stays in the derived proposal set"
+  # The Done-when is the checkable close of the stage, so the requirement must live there too
+  # — not only as narrative prose an agent can skim past.
+  printf '%s\n' "$slice" | grep -i 'done when' | grep -qi 'kept' \
+    || fail "Stage 4's Done-when does not require a 'kept' record for declined units"
+}
+
 test_skill_leading_words_present() {
   local S word; S="$(_skill_md)"
   # Steering vocabulary (spec §2/§3) — used consistently, greppable here.

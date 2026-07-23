@@ -83,9 +83,11 @@ Regenerate the audit — `scripts/ledger.sh regen-audit "$HC_RUN_ID"` — and pr
 
 Request approval through the harness's structured question tool where available, else a **numbered plain-text list, then stop for the reply**. The human's selection **is** the apply manifest. Record each choice as a `decision` (approved/declined) ledger record — that record is audit trail, not the enforcement.
 
+**Every declined unit also needs a `kept` record.** The `decision` says how the human ruled; the `kept` record says the unit stays, and it is the `kept` record that retracts the unit from the run's proposal set. Decline without one and the unit still reads as proposed to anyone auditing the run. This covers anything you surfaced and then ruled out — including items ruled out as **out of scope** rather than as live code (a config entry, a stylistic edit inside a live file). Better still, keep out-of-scope items out of the decision stream entirely: it is for units you are proposing to remove.
+
 **MUST NEVER** write a `decision:approved` record or call `cull.sh apply` without a human authorization in the same turn — approval is a **forced human** turn, not an agent-authored record.
 
-**Done when:** every proposed unit has a `decision` record and the approved units form the apply manifest.
+**Done when:** every proposed unit has a `decision` record, every declined unit also has a `kept` record, and the approved units form the apply manifest.
 
 ## Stage 5 — Apply approved
 
