@@ -92,6 +92,21 @@ test_skill_iron_law_present() {
     || fail "Iron Law present but not inside a fenced code block"
 }
 
+# Stage ordering was stated by the stage bodies but never DEFENDED. The eval showed
+# cull_run before the first oracle_detect in 3 of 4 gated scenarios. Pinned as an
+# invariant because a probe against an undetected oracle yields verdicts that are
+# indistinguishable from real ones — a silent-corruption path, not a style issue.
+# Deliberately NOT paired with a branch-ordering line: 'house-cleaning/* branch only'
+# is a carried floor the scripts enforce, and SKILL.md forbids restating those.
+test_skill_forbids_cull_before_stage_0() {
+  local S; S="$(_skill_md)"
+  # Pattern is deliberately backtick-free: a markdown-backticked pattern trips shellcheck
+  # SC2016 and is brittle if the prose is reformatted. "before Stage 0 closes" appears only
+  # in this bright line, so it pins the same invariant. Verified shellcheck-clean.
+  grep -qi 'before Stage 0 closes' "$S" \
+    || fail "SKILL.md missing the Stage-0 ordering bright line"
+}
+
 test_skill_leading_words_present() {
   local S word; S="$(_skill_md)"
   # Steering vocabulary (spec §2/§3) — used consistently, greppable here.

@@ -33,11 +33,12 @@ If it never entered as a candidate, it does not leave as a proposal. Units are n
 **Standing prohibitions**
 
 - **Never auto-delete.** No removal applies without a **forced human** approval turn (Stage 4). `cull.sh apply` runs only the human-authorized manifest.
-- Probes **always revert**: after any probe the tree is byte-identical to HEAD, and nothing is committed.
+- Probes **always revert**: after any probe the tree is byte-identical to HEAD, and nothing is committed. Tree not byte-identical afterwards? `git checkout -- .` and re-probe — a dirty tree invalidates every verdict that follows.
 - Approved deletions land as atomic, oracle-verified commits on a `house-cleaning/<date>` branch; **never merge red**.
 - The committed ledger and audit hold identifiers + evidence-type + verdict only — never file contents, diffs, or code.
+- **Never run `cull.sh` before Stage 0 closes.** A probe against an undetected oracle or an unverified baseline proves nothing — it produces verdicts that look identical to real ones.
 - Carried floors (the scripts enforce these — don't restate them): clean tree (modulo `.house-cleaning/`) · `house-cleaning/*` branch only · keep-list untouchable · secret-shaped paths refuse · untracked archived before removal.
-- **Record via the ledger, not by hand.** Every candidate, probe, and proposal MUST go through `scripts/ledger.sh` / `scripts/cull.sh` so the coverage ledger exists — never substitute a hand-rolled `cp`/`rm`/manual test-run probe for those scripts.
+- **Record via the ledger, not by hand.** Every candidate, probe, and proposal MUST go through `scripts/ledger.sh` / `scripts/cull.sh` so the coverage ledger exists — never substitute a hand-rolled `cp`/`rm`/manual test-run probe for those scripts. Recorded by hand? The coverage ledger is wrong and resumption will lie — re-record through the script before the stage closes.
 
 The run id set by `scripts/ledger.sh init` (Stage 0) sticks via `.house-cleaning/current-run` —
 you do NOT need to re-export `HC_RUN_ID` on every call. Storage is committed by default
