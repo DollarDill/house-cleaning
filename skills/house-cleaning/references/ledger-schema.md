@@ -184,7 +184,12 @@ Agent-authored (SKILL.md Stage 4), one per proposed unit the human ruled on:
 {"type":"decision","unit":"src/legacy/util.ts","decision":"approved","by":"user","ts":"2026-07-18T14:05:00Z"}
 ```
 
-Fields: `unit`, `decision` (`approved`|`declined`), `by` (`user`). **Last-write-wins per
+Fields: `unit`, `decision` (`approved`|`declined`), `by` (`user`). **`decision` is enforced at
+append time:** `ledger.sh append` refuses (exit 2) a `type:decision` record whose `decision` is
+absent, null, empty, wrong-type, or any value other than the two above — the same fail-closed
+posture as the no-content floor. An unreadable ruling is indeterminate, not a decision, and no
+downstream reader can recover the intent after the fact; refusing at the write surfaces the
+authoring mistake immediately. **Last-write-wins per
 unit:** `cull.sh apply`'s `_is_approved` check reads all `decision` records for a unit and
 looks only at the *last* one — re-deciding a unit (approve, then later decline the same
 run's proposal) supersedes the earlier record rather than conflicting with it. This record is

@@ -93,6 +93,21 @@ append() {
     echo "ledger: refuse — record carries forbidden key '$(echo "$found" | head -1)' (no code/content in committed artifacts, any depth)" >&2
     exit 2
   fi
+  # Decision-record shape floor: a `type:decision` record exists to convey exactly one thing —
+  # the ruling — so reject at append time when it is absent or not one of the two schema values
+  # (references/ledger-schema.md §decision). Same fail-closed posture as the content floor
+  # above. Without this a shape-invalid record is accepted silently, and the damage surfaces
+  # far from its cause: `cull.sh`'s `_is_approved` reads `.[-1].decision` and so fails closed
+  # (no wrongful deletion), but any downstream auditor reading the ledger cannot distinguish
+  # "declined" from "unreadable" — an unreadable ruling is indeterminate, not a decision, and
+  # a consumer that must treat indeterminate as not-a-pass has no way to recover the intent
+  # after the fact. Refusing here surfaces the authoring mistake in seconds instead. The bare
+  # equality comparison covers every invalid shape at once: absent, null, "", and wrong-type
+  # (array/number/object) all compare false.
+  if [ "$type" = "decision" ]; then
+    echo "$fields" | jq -e '.decision == "approved" or .decision == "declined"' >/dev/null 2>&1 \
+      || { echo "ledger: refuse — type:decision record must carry decision:\"approved\"|\"declined\"" >&2; exit 2; }
+  fi
   # Newline guard + merge type + ts; jq -c guarantees single-line output.
   echo "$fields" | jq -c --arg ty "$type" --arg t "$(date -u +%FT%TZ)" '. + {type:$ty, ts:$t}' \
     >> "$dir/ledger.jsonl"

@@ -162,6 +162,54 @@ test_append_blank_id_falls_back_to_timestamp_default() {
   ) || exit 1; rm -rf "$tmp"; echo "ok: blank-id-fallback"
 }
 
+# cc-eval-16n3q: `append` validates only the forbidden-key content floor — it never checks
+# that a `type:decision` record actually carries `decision` in {approved,declined}, the one
+# field the record exists to convey (references/ledger-schema.md §decision). A shape-invalid
+# decision record is silently accepted, and the damage surfaces two systems away: cull.sh's
+# `_is_approved` reads `.[-1].decision == "approved"` (fails closed, fine), but cc-eval's
+# disposition-aware over_reach gate (ADR-0053) scores an escalate-expected unit whose decision
+# record is unreadable as *unevaluable*, tripping `disposition_unevaluable_in_any_k` and
+# refusing promotion of the whole run — discovered only at finalize, after a BILLED k=3 run.
+# Reject at append time (exit 2, same fail-closed posture as the content floor) so the failure
+# surfaces in-container within seconds instead of costing a billed run.
+test_append_refuses_decision_record_without_valid_decision_field() {
+  local d; d="$(mktemp -d)"; ( cd "$d" && git init -q )
+  ( cd "$d" && HC_LEDGER_MODE=committed bash "$LEDGER" init run1 src abc123 )
+  local L="$d/.house-cleaning/runs/run1/ledger.jsonl"
+  local before; before="$(wc -l < "$L")"
+
+  # (a) `decision` absent entirely, (b) invalid value, (c) JSON null, (d) empty string,
+  # (e) right value but wrong type (not the string) — each must refuse with exit 2.
+  local bad
+  for bad in '{"unit":"src/x.ts","by":"user"}' \
+             '{"unit":"src/x.ts","decision":"maybe","by":"user"}' \
+             '{"unit":"src/x.ts","decision":null,"by":"user"}' \
+             '{"unit":"src/x.ts","decision":"","by":"user"}' \
+             '{"unit":"src/x.ts","decision":["approved"],"by":"user"}'; do
+    if ( cd "$d" && HC_LEDGER_MODE=committed bash "$LEDGER" append run1 decision "$bad" ) 2>/dev/null; then
+      fail "append accepted a shape-invalid decision record: $bad"
+    fi
+  done
+  [ "$(wc -l < "$L")" = "$before" ] || fail "append wrote a record for a refused decision"
+
+  # Both valid values must still be accepted — the guard must not reject the happy path.
+  ( cd "$d" && HC_LEDGER_MODE=committed bash "$LEDGER" append run1 decision \
+      '{"unit":"src/x.ts","decision":"approved","by":"user"}' ) \
+    || fail "append refused a VALID decision:approved record"
+  ( cd "$d" && HC_LEDGER_MODE=committed bash "$LEDGER" append run1 decision \
+      '{"unit":"src/y.ts","decision":"declined","by":"user"}' ) \
+    || fail "append refused a VALID decision:declined record"
+  tail -1 "$L" | jq -e '.type=="decision" and .decision=="declined"' >/dev/null \
+    || fail "valid decision record not written correctly"
+
+  # The guard is scoped to type=decision ONLY — every other record type is unaffected, and a
+  # non-decision record is never required to carry a `decision` field.
+  ( cd "$d" && HC_LEDGER_MODE=committed bash "$LEDGER" append run1 probe \
+      '{"unit":"src/z.ts","granularity":"file","verdict":"provably-dead","git_sha":"abc123"}' ) \
+    || fail "guard leaked onto a non-decision record type"
+  rm -rf "$d"
+}
+
 # T1 follow-up (review fix): a future reordering of init() (mkdir before validate) could
 # silently reintroduce the traversal bug undetected — no existing test pinned that
 # ordering directly. For each unsafe run id, `init` must refuse (exit != 0) AND must not
