@@ -5,6 +5,16 @@ All notable changes to house-cleaning will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **The boundary section now carries a discipline layer.** An Iron Law
+  (`NO PROPOSAL WITHOUT A CANDIDATE RECORD`), a bright line against running `cull.sh`
+  before Stage 0 closes, remedy clauses on the always-revert and record-via-ledger
+  prohibitions, a seven-row rationalization table, and a self-referential defense line.
+  The stages, scripts, and ledger schema are unchanged.
+
 ## 0.2.0 — BREAKING
 
 **Tiered auto-apply is removed. The deletion test is now propose-only and
