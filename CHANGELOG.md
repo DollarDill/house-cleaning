@@ -11,9 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The boundary section now carries a discipline layer.** An Iron Law
   (`NO PROPOSAL WITHOUT A CANDIDATE RECORD`), a bright line against running `cull.sh`
-  before Stage 0 closes, remedy clauses on the always-revert and record-via-ledger
-  prohibitions, a seven-row rationalization table, and a self-referential defense line.
-  The stages, scripts, and ledger schema are unchanged.
+  before Stage 0 closes, a seven-row rationalization table, and a self-referential
+  defense line. The stages, scripts, and ledger schema are unchanged.
+
+### Changed
+
+- The **always revert** and **record via the ledger** prohibitions each now carry a
+  remedy clause — what to do once the line has been crossed, not just the prohibition.
 
 ## 0.2.0 — BREAKING
 
